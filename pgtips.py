@@ -362,7 +362,11 @@ class MyFrame(wx.Frame):
             # losslessly rotate
             p = Popen([jpegexiforient, "-n", destFile], stdin = PIPE, stdout = PIPE, stderr = PIPE)
             stdout, stderr = p.communicate()
-            orient = int(stdout)
+            try:
+                orient = int(stdout)
+            except ValueError:
+                # No orientation flag? Set orient to the value that prevents any further work
+                orient = 1
             if orient > 1:
                 wx.CallAfter(self._statusBar.SetStatusText, "Importing %s (losslessly rotating)" % f)
                 print destFile, "- using option:", _jpegtranOptions[orient]
