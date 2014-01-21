@@ -559,7 +559,11 @@ class MyFrame(wx.Frame):
                 img = list(gen_images_from_files(srcFile, exiftool = self._exiftoolChecked))[0]
             exportDatetime = img.dateTime
         if exportDatetime is None and (ext in other or len(other) == 0):
-            exportDatetime = datetime.datetime.fromtimestamp(os.stat(srcFile).st_ctime)
+            otherFile = list(gen_images_from_files(srcFile, exiftool = self._exiftoolChecked))[0]
+            exportDatetime = otherFile.dateTime
+            print f, exportDatetime
+            assert exportDatetime is not None
+            # exportDatetime = datetime.datetime.fromtimestamp(os.stat(srcFile).st_ctime)
         if exportDatetime is not None:
             exportDir = os.path.join(self._optionsDialog.options["FilingDir"],
                                      exportDatetime.strftime(self._optionsDialog.options["FilingStruct"]))
