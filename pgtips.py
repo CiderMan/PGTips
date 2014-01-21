@@ -93,7 +93,7 @@ class CustomStatusBar(wx.StatusBar):
         self.sizeChanged = False
 
 class MyFrame(wx.Frame):
-    def __init__(self, parent, id=-1, title='wx.aui Test',
+    def __init__(self, parent, id=-1, title=_DEFAULT_STATUS_TEXT,
                  pos=wx.DefaultPosition, size=(800, 500),
                  style=wx.DEFAULT_FRAME_STYLE):
         wx.Frame.__init__(self, parent, id, title, pos, size, style)
