@@ -196,6 +196,11 @@ class MyFrame(wx.Frame):
         self._workerThread = Thread(target = self._WorkerThread)
         self._workerThread.start()
 
+        self._importing = False
+        self._importQueue = Queue.Queue()
+        self._importThread = Thread(target = self._ImportThread)
+        self._importThread.start()
+
         self._checkQueue = Queue.Queue()
 
         self._images.add_image_select_notify(self.OnImageSelected)
@@ -216,7 +221,6 @@ class MyFrame(wx.Frame):
                     fn, args, kwargs = self._workerQueue.get_nowait()
                 except Queue.Empty:
                     self._working = False
-                    wx.CallAfter(self._statusBar.SetStatusText, _DEFAULT_STATUS_TEXT)
 
     # Method to pass work to the worker thread using the same pattern as
     # wx.CallAfter()
@@ -236,10 +240,11 @@ class MyFrame(wx.Frame):
             except Queue.Empty:
                 break
 
-        if self._working:
+        if self._working or self._importing:
             self._statusBar.progress.Pulse()
             wx.CallLater(100, self._PulseProgress)
         else:
+            self._statusBar.SetStatusText(_DEFAULT_STATUS_TEXT)
             self._statusBar.progress.SetValue(0)
             wx.CallLater(500, self._PulseProgress)
 
@@ -350,6 +355,33 @@ class MyFrame(wx.Frame):
 ####
 ################################################################################
 
+    # This function is run as a seperate thread to automatically batch the files
+    # to exiftool to improve performance
+    def _ImportThread(self):
+        while not self._closing:
+            files = []
+            try:
+                filename = self._importQueue.get_nowait()
+            except Queue.Empty:
+                self._importing = False
+                filename = self._importQueue.get()
+            self._importing = True
+            if filename is not None:
+                files.append(filename)
+                try:
+                    timeout = 0.5
+                    while True:
+                        filename = self._importQueue.get(block = timeout > 0, timeout = timeout)
+                        if filename is not None:
+                            files.append(filename)
+                            timeout -= 0.1
+                        else:
+                            break
+                except Queue.Empty:
+                    for i in gen_images_from_files(files, exiftool = self._exiftoolChecked):
+                        wx.CallAfter(self._statusBar.SetStatusText, "Loading " + i["FileName"])
+                        wx.CallAfter(self._add_image, i)
+
     def _copy_file_work(self, f, dirpath, workingDir, ext, process, useJpegtran, jpegexiforient, jpegtran):
         wx.CallAfter(self._statusBar.SetStatusText, "Importing " + f)
         srcFile = os.path.join(dirpath, f)
@@ -386,9 +418,12 @@ class MyFrame(wx.Frame):
         if process:
             # Now that the file is where it needs to be, load the file
             # TODO: Could optimize by batching files together?
-            wx.CallAfter(self._statusBar.SetStatusText, "Loading " + f)
-            for i in gen_images_from_files(destFile, exiftool = self._exiftoolChecked):
-                wx.CallAfter(self._add_image, i)
+            if 1:
+                self._importQueue.put(destFile)
+            else:
+                wx.CallAfter(self._statusBar.SetStatusText, "Loading " + f)
+                for i in gen_images_from_files(destFile, exiftool = self._exiftoolChecked):
+                    wx.CallAfter(self._add_image, i)
 
     def _copy_file_overwrite_check(self, f, dirpath, workingDir, ext, process, useJpegtran, jpegexiforient, jpegtran):
         if wx.MessageBox(
@@ -666,6 +701,10 @@ class MyFrame(wx.Frame):
         self._workerQueue.put((None, None, None))
         if self._workerThread.is_alive():
             self._workerThread.join()
+        # Kill the import thread
+        self._importQueue.put(None)
+        if self._importThread.is_alive():
+            self._importThread.join()
         # deinitialize the frame manager
         self._mgr.UnInit()
         # delete the frame
