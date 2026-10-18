@@ -1,14 +1,15 @@
 from math import *
-from utils import *
-from regions import Point, Region
+from functools import reduce
+from .utils import *
+from .regions import Point, Region
 import wx
-import os.path
+from pathlib import Path
 
 _DEFAULT_ZOOM = 15
 
 
 def get_tile_number(zoom, lat, long):
-    n = 2 ** zoom
+    n = 2**zoom
 
     xtile = ((long + 180) / 360) * n
     xpixel, xtile = modf(xtile)
@@ -23,16 +24,18 @@ def get_tile_number(zoom, lat, long):
 
     return (xtile, xpixel, ytile, ypixel)
 
-def get_lat_long(xtile, ytile, zoom):
-    n = 2 ** zoom
 
-    long = xtile / n * 360.0 - 180.0;
+def get_lat_long(xtile, ytile, zoom):
+    n = 2**zoom
+
+    long = xtile / n * 360.0 - 180.0
     lat = (atan(sinh(pi * (1 - 2 * ytile / n)))) * 180 / pi
 
     return (lat, long)
 
+
 def lat_long_from_pixel(x, y, zoom):
-    n = 2 ** zoom
+    n = 2**zoom
     xtile = float(x)
     xtile /= _TILE_SIZE
     xtile %= n
@@ -40,6 +43,7 @@ def lat_long_from_pixel(x, y, zoom):
     ytile /= _TILE_SIZE
     ytile %= n
     return get_lat_long(xtile, ytile, zoom)
+
 
 class SlippyPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
@@ -56,12 +60,12 @@ class SlippyPanel(wx.Panel):
         self._bitmapZoom = 0
         self._bitmaps = {}
         self._tiles = []
-        self._size = self.GetSizeTuple()
+        self._size = tuple(self.GetSize())
         self._pollTimer = wx.Timer(self, -1)
 
         # start with the single zoom 0 tile centred on the panel
         self._zoom = 0
-        res = _TILE_SIZE # Zoom = 0 so the world is a single tile
+        res = _TILE_SIZE  # Zoom = 0 so the world is a single tile
         # _tlx and _tly are the top-left co-ordinate in map space. However, the tlx value
         # is kept positive to allow wrapping
         self._tlx = _TILE_SIZE - self._size[0]
@@ -79,7 +83,7 @@ class SlippyPanel(wx.Panel):
         self._lastMove = (0, 0)
 
         # This is required to allow use of buffered DCs
-        self.SetBackgroundStyle(wx.BG_STYLE_CUSTOM)
+        self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
 
         self.Bind(wx.EVT_PAINT, self.OnPaint)
         self.Bind(wx.EVT_SIZE, self.OnSize)
@@ -89,9 +93,10 @@ class SlippyPanel(wx.Panel):
         self.Bind(wx.EVT_LEAVE_WINDOW, self.OnLeaveWindow)
         self.Bind(wx.EVT_MOTION, self.OnMotion)
         self.Bind(wx.EVT_LEFT_DOWN, self.OnLeftDown)
+        self.Bind(wx.EVT_WINDOW_DESTROY, self.OnDestroy)
 
     def get_coordinate(self, lat, long):
-        n = 2 ** self._zoom
+        n = 2**self._zoom
 
         xtile = ((long + 180) / 360) * n
 
@@ -100,16 +105,22 @@ class SlippyPanel(wx.Panel):
 
         return (round(xtile * _TILE_SIZE), round(ytile * _TILE_SIZE))
 
+    def OnDestroy(self, evt):
+        # Stop polling for tiles, otherwise the timer fires on the destroyed panel
+        if evt.GetEventObject() is self:
+            self._pollTimer.Stop()
+        evt.Skip()
+
     def OnTimer(self, evt):
         waiting = False
         moreAvail = False
         newTiles = []
         for tile, x, y in self._tiles:
-            if type(tile) is str:
+            if isinstance(tile, Path):
                 # This is a filename that wasn't ther last time we checked
-                if os.path.isfile(tile):
+                if tile.is_file():
                     # There now
-                    tile = wx.Image(tile, wx.BITMAP_TYPE_PNG).ConvertToBitmap()
+                    tile = wx.Image(str(tile), wx.BITMAP_TYPE_PNG).ConvertToBitmap()
                     moreAvail = True
                 else:
                     waiting = True
@@ -129,12 +140,12 @@ class SlippyPanel(wx.Panel):
     def _PopulateTiles(self):
         self._cache.StartNewFetchBatch()
         # Ensure that the top-left X is not negative
-        res = (2 ** self._zoom) * _TILE_SIZE
+        res = (2**self._zoom) * _TILE_SIZE
         while self._tlx < 0:
             self._tlx += res
 
         # Now work out the tile index for the top-left corner
-        xtile, ytile = self._tlx / _TILE_SIZE, self._tly / _TILE_SIZE
+        xtile, ytile = self._tlx // _TILE_SIZE, self._tly // _TILE_SIZE
         # Now work out where this tile should be drawn relative to the top-left
         xord, yord = -(self._tlx - xtile * _TILE_SIZE), -(self._tly - ytile * _TILE_SIZE)
 
@@ -145,8 +156,8 @@ class SlippyPanel(wx.Panel):
         self._bitmaps = {}
         self._tiles = []
 
-        xnum = (self._size[0] - 1) / _TILE_SIZE + 1
-        ynum = (self._size[1] - 1) / _TILE_SIZE + 1
+        xnum = (self._size[0] - 1) // _TILE_SIZE + 1
+        ynum = (self._size[1] - 1) // _TILE_SIZE + 1
         needToWait = False
         for x in range(xnum + 1):
             for y in range(ynum + 1):
@@ -156,11 +167,11 @@ class SlippyPanel(wx.Panel):
                     tile = oldBitmaps[(xindex, yindex)]
                     self._tiles.append((tile, xord + x * _TILE_SIZE, yord + y * _TILE_SIZE))
                     self._bitmaps[(xindex, yindex)] = tile
-                except:
+                except KeyError:
                     fname = self._cache.GetTileFilename(xtile + x, ytile + y, self._zoom)
                     if fname is not None:
-                        if os.path.isfile(fname):
-                            tile = wx.Image(fname, wx.BITMAP_TYPE_PNG).ConvertToBitmap()
+                        if fname.is_file():
+                            tile = wx.Image(str(fname), wx.BITMAP_TYPE_PNG).ConvertToBitmap()
                             self._bitmaps[(xindex, yindex)] = tile
                         else:
                             # Not currently in the cache
@@ -172,13 +183,13 @@ class SlippyPanel(wx.Panel):
 
         self._visibleTracks = []
 
-        latWraps = self._size[1] >= (_TILE_SIZE * (2 ** self._zoom))
-        longWraps = self._size[0] >= (_TILE_SIZE * (2 ** self._zoom))
+        latWraps = self._size[1] >= (_TILE_SIZE * (2**self._zoom))
+        longWraps = self._size[0] >= (_TILE_SIZE * (2**self._zoom))
         lat, long_ = lat_long_from_pixel(self._tlx, self._tly, self._zoom)
         tl = Point(90 if latWraps else lat, -180 if longWraps else long_)
-        lat, long_ = lat_long_from_pixel(self._tlx + self._size[0],
-                                         self._tly + self._size[1],
-                                         self._zoom)
+        lat, long_ = lat_long_from_pixel(
+            self._tlx + self._size[0], self._tly + self._size[1], self._zoom
+        )
         br = Point(90 if latWraps else lat, 180 if longWraps else long_)
         viewport_region = Region(tl, br)
 
@@ -193,10 +204,11 @@ class SlippyPanel(wx.Panel):
         for marker in self._markers:
             markerX, markerY = self.get_coordinate(marker.lat, marker.long)
             if self._region_overlaps_viewport(
-                    markerX - marker.beforeHotspot,
-                    markerY - marker.aboveHotspot,
-                    markerX + marker.afterHotspot,
-                    markerY + marker.belowHotspot):
+                markerX - marker.beforeHotspot,
+                markerY - marker.aboveHotspot,
+                markerX + marker.afterHotspot,
+                markerY + marker.belowHotspot,
+            ):
                 self._visibleMarkers.append((markerX - self._tlx, markerY - self._tly, marker))
 
     def OnPaint(self, evt):
@@ -207,7 +219,7 @@ class SlippyPanel(wx.Panel):
         dc.SetPen(wx.Pen("BLUE", 3))
 
         for tile, x, y in self._tiles:
-            if type(tile) is str:
+            if isinstance(tile, Path):
                 pass
             else:
                 dc.DrawBitmap(tile, x, y, False)
@@ -216,28 +228,36 @@ class SlippyPanel(wx.Panel):
             # Add an extra point a single pixel offset from the last point as the last pixel is not drawn
             extraX, extraY = track.get_track(self._zoom)[-1]
             extraPoint = extraX + 1, extraY
-            dc.DrawLines([wx.Point(p[0] - self._tlx, p[1] - self._tly) for p in track.get_track(self._zoom)] +
-                         [wx.Point(extraPoint[0] - self._tlx, extraPoint[1] - self._tly)])
+            dc.DrawLines(
+                [wx.Point(p[0] - self._tlx, p[1] - self._tly) for p in track.get_track(self._zoom)]
+                + [wx.Point(extraPoint[0] - self._tlx, extraPoint[1] - self._tly)]
+            )
 
         for markerX, markerY, marker in self._visibleMarkers:
             if marker.shadow is not None:
                 hotspot = marker.shadow.hotspot
-                dc.DrawBitmap(marker.shadow.bitmap, markerX - hotspot[0], markerY - hotspot[1], True)
+                dc.DrawBitmap(
+                    marker.shadow.bitmap, markerX - hotspot[0], markerY - hotspot[1], True
+                )
             hotspot = marker.pin.hotspot
             dc.DrawBitmap(marker.pin.bitmap, markerX - hotspot[0], markerY - hotspot[1], True)
 
         if len(self._tiles) > 0:
             attribution = self._cache.source.get_attribution()
             if attribution is not None:
-                dc.SetFont(wx.Font(8, wx.SWISS, wx.ITALIC, wx.NORMAL, False))
+                dc.SetFont(
+                    wx.Font(
+                        8, wx.FONTFAMILY_SWISS, wx.FONTSTYLE_ITALIC, wx.FONTWEIGHT_NORMAL, False
+                    )
+                )
                 dc.DrawText(attribution, 2, 2)
 
         dc.SetPen(wx.NullPen)
 
     def OnSize(self, evt):
-        newSize = self.GetSizeTuple()
-        self._tlx += (self._size[0] - newSize[0]) / 2
-        self._tly += (self._size[1] - newSize[1]) / 2
+        newSize = tuple(self.GetSize())
+        self._tlx += (self._size[0] - newSize[0]) // 2
+        self._tly += (self._size[1] - newSize[1]) // 2
         self._size = newSize
         self._PopulateTiles()
         self.Refresh()
@@ -261,7 +281,11 @@ class SlippyPanel(wx.Panel):
                 markerX += xdiff
                 markerY += ydiff
                 self._activeMarkerXy = (markerX, markerY)
-                lat, long = get_lat_long(float(markerX + self._tlx) / _TILE_SIZE, float(markerY + self._tly) / _TILE_SIZE, self._zoom)
+                lat, long = get_lat_long(
+                    float(markerX + self._tlx) / _TILE_SIZE,
+                    float(markerY + self._tly) / _TILE_SIZE,
+                    self._zoom,
+                )
                 self._activeMarker.lat = lat
                 self._activeMarker.long = long
             else:
@@ -277,15 +301,17 @@ class SlippyPanel(wx.Panel):
         delta = self._wheelDelta + evt.GetWheelRotation()
         isPositive = delta > 0
         if not isPositive:
-            delta = - delta
-        steps = delta / evt.GetWheelDelta()
+            delta = -delta
+        steps = delta // evt.GetWheelDelta()
         if steps == 0:
             self._wheelDelta += evt.GetWheelRotation()
         else:
-            where = evt.GetPositionTuple()
+            where = tuple(evt.GetPosition())
             xord = where[0] + self._tlx
             yord = where[1] + self._tly
-            lat, long = get_lat_long(float(xord) / _TILE_SIZE, float(yord) / _TILE_SIZE, self._zoom)
+            lat, long = get_lat_long(
+                float(xord) / _TILE_SIZE, float(yord) / _TILE_SIZE, self._zoom
+            )
 
             self._wheelDelta = delta - steps * evt.GetWheelDelta()
             if isPositive:
@@ -293,12 +319,12 @@ class SlippyPanel(wx.Panel):
                 if self._zoom > 18:
                     self._zoom = 18
             else:
-                self._wheelDelta = - self._wheelDelta
+                self._wheelDelta = -self._wheelDelta
                 self._zoom -= steps
                 if self._zoom < 0:
                     self._zoom = 0
 
-            self.CentreMap(lat, long, point = where)
+            self.CentreMap(lat, long, point=where)
 
     def OnLeftDown(self, evt):
         needRefresh = False
@@ -388,17 +414,14 @@ class SlippyPanel(wx.Panel):
         c = region.get_centre()
         self.CentreMap(c.lat, c.long, best[2])
 
-    def CentreMap(self, lat, long, zoom = None, point = None):
+    def CentreMap(self, lat, long, zoom=None, point=None):
         if zoom is None:
-            try:
-                zoom = self._zoom
-            except:
-                zoom = _DEFAULT_ZOOM
+            zoom = getattr(self, "_zoom", _DEFAULT_ZOOM)
         self._zoom = zoom
         if point is None:
             xsize, ysize = self._size
-            xstart = xsize / 2
-            ystart = ysize / 2
+            xstart = xsize // 2
+            ystart = ysize // 2
         else:
             xstart, ystart = point
         xtile, xpixel, ytile, ypixel = get_tile_number(zoom, lat, long)

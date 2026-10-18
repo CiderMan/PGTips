@@ -1,6 +1,7 @@
 from math import *
-from regions import *
-from utils import *
+from .regions import *
+from .utils import *
+
 
 class Track(object):
     def __init__(self, points):
@@ -20,6 +21,7 @@ class Track(object):
         try:
             return self._cache[zoom]
         except KeyError:
+
             def gen_coords(pts):
                 last = None
                 for p in pts:
@@ -27,6 +29,6 @@ class Track(object):
                     if n != last:
                         yield n
                     last = n
+
             self._cache[zoom] = [x for x in gen_coords(self._points)]
             return self._cache[zoom]
-

@@ -1,19 +1,21 @@
-#!/usr/bin/env python
-import wx, os, sys, shutil
+#!/usr/bin/env python3
+import wx, sys, shutil
+from pathlib import Path
 
 # Include the sub-directory containing the sub-modules when looking for imports
-sys.path.append("sub-modules")
+sys.path.append(str(Path(__file__).resolve().parent / "sub-modules"))
 
 import wx.lib.agw.aui as aui
-import  wx.lib.mixins.listctrl as listmix
+import wx.lib.mixins.listctrl as listmix
 import datetime
+from functools import reduce
 import images
 from threading import Thread
-import Queue
+import queue
 from subprocess import Popen, PIPE, STDOUT
 import slippy
 from gpsfiles import gen_tracks_from_files
-from imagefiles import gen_images_from_files
+from imagefiles import gen_images_from_files, read_orientation, set_orientation
 from options import OptionsDialog
 from imagelist import ImageListCtrlPanel
 
@@ -22,16 +24,42 @@ _DEFAULT_STATUS_TEXT = "PGTips v0.1"
 # Define the jpegtran command-line options to losslessly correct
 # the possible orientations for an image
 _jpegtranOptions = [
-    None, # 0 - not present
-    [], # 1 - no translation
-    ["-flip", "horizontal"], # 2 - Shouldn't get this with a photo?
-    ["-rotate", "180"], # 3 - Camera was upside down!
-    ["-flip", "vertical"], # 4 - Shouldn't get this with a photo?
-    ["-transpose"], # 5 - Shouldn't get this with a photo?
-    ["-rotate", "90"], # 6 - Camera was on its side
-    ["-transverse"], # 7 - Shouldn't get this with a photo?
-    ["-rotate", "270"], # 8 - Camera was on its other side
+    None,  # 0 - not present
+    [],  # 1 - no translation
+    ["-flip", "horizontal"],  # 2 - Shouldn't get this with a photo?
+    ["-rotate", "180"],  # 3 - Camera was upside down!
+    ["-flip", "vertical"],  # 4 - Shouldn't get this with a photo?
+    ["-transpose"],  # 5 - Shouldn't get this with a photo?
+    ["-rotate", "90"],  # 6 - Camera was on its side
+    ["-transverse"],  # 7 - Shouldn't get this with a photo?
+    ["-rotate", "270"],  # 8 - Camera was on its other side
 ]
+
+
+def _lossless_rotate(jpegFile, orientation, jpegtran="jpegtran", exiftool="exiftool"):
+    """
+    Losslessly transform a JPEG to correct the given EXIF orientation, then reset the
+    file's orientation flag to say that no further correction is needed
+    """
+    tmpFile = jpegFile.with_name(jpegFile.name + ".pgtips~.jpg")
+    try:
+        p = Popen(
+            [jpegtran, "-copy", "all"]
+            + _jpegtranOptions[orientation]
+            + ["-outfile", tmpFile, jpegFile],
+            stdin=PIPE,
+            stdout=PIPE,
+            stderr=PIPE,
+            text=True,
+        )
+        stdout, stderr = p.communicate()
+        if p.returncode != 0:
+            raise RuntimeError("jpegtran failed: " + stderr)
+        set_orientation(tmpFile, 1, exiftool)
+        tmpFile.replace(jpegFile)
+    finally:
+        tmpFile.unlink(missing_ok=True)
+
 
 class GpsFileCache(object):
     """
@@ -40,6 +68,7 @@ class GpsFileCache(object):
     GPS track are retreived by a method, which will generate it if required or simply
     return the already generated one if it has already been requested previously
     """
+
     def __init__(self, inner):
         self.gpsFile = inner
         self._tracks = [None for n in range(len(inner))]
@@ -48,6 +77,7 @@ class GpsFileCache(object):
         if self._tracks[n] is None:
             self._tracks[n] = slippy.Track(((x[1], x[2]) for x in self.gpsFile[n]))
         return self._tracks[n]
+
 
 class CustomStatusBar(wx.StatusBar):
     def __init__(self, parent):
@@ -69,7 +99,7 @@ class CustomStatusBar(wx.StatusBar):
         # This will fall into field 1 (the second field)
         self.progress = wx.Gauge(self, 100)
         self.progress.SetValue(0)
-        
+
         # Now set the initial position of the progress bar
         self.Reposition()
 
@@ -88,21 +118,28 @@ class CustomStatusBar(wx.StatusBar):
     # reposition the checkbox
     def Reposition(self):
         rect = self.GetFieldRect(1)
-        self.progress.SetPosition((rect.x+2, rect.y+2))
-        self.progress.SetSize((rect.width-4, rect.height-4))
+        self.progress.SetPosition((rect.x + 2, rect.y + 2))
+        self.progress.SetSize((rect.width - 4, rect.height - 4))
         self.sizeChanged = False
 
+
 class MyFrame(wx.Frame):
-    def __init__(self, parent, id=-1, title=_DEFAULT_STATUS_TEXT,
-                 pos=wx.DefaultPosition, size=(800, 500),
-                 style=wx.DEFAULT_FRAME_STYLE):
+    def __init__(
+        self,
+        parent,
+        id=-1,
+        title=_DEFAULT_STATUS_TEXT,
+        pos=wx.DefaultPosition,
+        size=(800, 500),
+        style=wx.DEFAULT_FRAME_STYLE,
+    ):
         wx.Frame.__init__(self, parent, id, title, pos, size, style)
 
         self._statusBar = CustomStatusBar(self)
 
         self.SetStatusBar(self._statusBar)
 
-        self._optionsDialog = OptionsDialog(self, optFile = "pgtips.opt")
+        self._optionsDialog = OptionsDialog(self, optFile="pgtips.opt")
 
         self._closing = False
 
@@ -110,18 +147,20 @@ class MyFrame(wx.Frame):
 
         self._mgr = aui.AuiManager(
             self,
-            aui.AUI_MGR_ALLOW_FLOATING |
-            aui.AUI_MGR_TRANSPARENT_DRAG |
-            aui.AUI_MGR_VENETIAN_BLINDS_HINT |
-            aui.AUI_MGR_NO_VENETIAN_BLINDS_FADE |
-            aui.AUI_MGR_LIVE_RESIZE |
-            aui.AUI_MGR_SMOOTH_DOCKING |
-            aui.AUI_MGR_ANIMATE_FRAMES
-            )
+            aui.AUI_MGR_ALLOW_FLOATING
+            | aui.AUI_MGR_TRANSPARENT_DRAG
+            | aui.AUI_MGR_VENETIAN_BLINDS_HINT
+            | aui.AUI_MGR_NO_VENETIAN_BLINDS_FADE
+            | aui.AUI_MGR_LIVE_RESIZE
+            | aui.AUI_MGR_SMOOTH_DOCKING
+            | aui.AUI_MGR_ANIMATE_FRAMES,
+        )
 
         # Sort out the menu
         menuDef = [
-                ("&File", [
+            (
+                "&File",
+                [
                     ("Load GPS Files...\tCtrl-G", self.OnLoadGpsFiles),
                     ("Load image Files...\tCtrl-L", self.OnLoadImages),
                     ("", None),
@@ -129,15 +168,22 @@ class MyFrame(wx.Frame):
                     ("Export files\tCtrl-E", self.OnExport),
                     ("", None),
                     ("Exit\tCtrl-Q", self.OnClose),
-                    ]),
-                ("&Geotag", [
+                ],
+            ),
+            (
+                "&Geotag",
+                [
                     ("Geotag all images\tCtrl-T", self.OnGeotagAll),
-                    ]),
-                ("&Tools", [
+                ],
+            ),
+            (
+                "&Tools",
+                [
                     ("Toggle full screen mode\tF11", self.OnToggleFullScreen),
                     ("Options...", self.OnOptions),
-                    ]),
-                ]
+                ],
+            ),
+        ]
 
         def create_menu(definition):
             menu = wx.Menu()
@@ -146,7 +192,7 @@ class MyFrame(wx.Frame):
                     menu.AppendSeparator()
                 elif isinstance(content, list):
                     m = create_menu(content)
-                    menu.AppendMenu(-1, name, m)
+                    menu.AppendSubMenu(m, name)
                 else:
                     item = menu.Append(-1, name)
                     self.Bind(wx.EVT_MENU, content, item)
@@ -164,24 +210,28 @@ class MyFrame(wx.Frame):
         # self.ShowFullScreen(self._fullscreen, wx.FULLSCREEN_NOBORDER | wx.FULLSCREEN_NOCAPTION)
 
         # create several text controls
-        source = slippy.CloudmadeTileSource("742a64a1ef7540f18e5092560b84a67b")
-        tileCache = slippy.SlippyCache(source) #, proxy = "http://80.254.147.83:8080")
+        source = slippy.OpenStreetMapTileSource()
+        tileCache = slippy.SlippyCache(source)  # , proxy = "http://80.254.147.83:8080")
 
-        self._slipMap = slippy.SlippyPanel(self, -1, cache = tileCache, size = (300, 300))
+        self._slipMap = slippy.SlippyPanel(self, -1, cache=tileCache, size=(300, 300))
         self._tracks = []
         self._markers = {}
 
-        self._gpxTree = wx.TreeCtrl(self, -1,
-                                    wx.DefaultPosition, wx.Size(-1,-1),
-                                    wx.TR_HIDE_ROOT | wx.TR_HAS_BUTTONS | wx.TR_LINES_AT_ROOT )
+        self._gpxTree = wx.TreeCtrl(
+            self,
+            -1,
+            wx.DefaultPosition,
+            wx.Size(-1, -1),
+            wx.TR_HIDE_ROOT | wx.TR_HAS_BUTTONS | wx.TR_LINES_AT_ROOT,
+        )
         self._gpxRoot = self._gpxTree.AddRoot("GPS Files")
 
         self._images = ImageListCtrlPanel(self)
 
         # add the panes to the manager
-        self._mgr.AddPane(self._slipMap, wx.TOP, 'Mapping pane')
-        #self._mgr.AddPane(text1, wx.TOP, 'Preview pane')
-        self._mgr.AddPane(self._gpxTree, wx.TOP, 'GPS fle pane')
+        self._mgr.AddPane(self._slipMap, wx.TOP, "Mapping pane")
+        # self._mgr.AddPane(text1, wx.TOP, 'Preview pane')
+        self._mgr.AddPane(self._gpxTree, wx.TOP, "GPS fle pane")
         self._mgr.AddPane(self._images, wx.CENTER)
 
         # tell the manager to 'commit' all the changes just made
@@ -192,16 +242,16 @@ class MyFrame(wx.Frame):
 
         # Create the worker thread
         self._working = False
-        self._workerQueue = Queue.Queue()
-        self._workerThread = Thread(target = self._WorkerThread)
+        self._workerQueue = queue.Queue()
+        self._workerThread = Thread(target=self._WorkerThread)
         self._workerThread.start()
 
         self._importing = False
-        self._importQueue = Queue.Queue()
-        self._importThread = Thread(target = self._ImportThread)
+        self._importQueue = queue.Queue()
+        self._importThread = Thread(target=self._ImportThread)
         self._importThread.start()
 
-        self._checkQueue = Queue.Queue()
+        self._checkQueue = queue.Queue()
 
         self._images.add_image_select_notify(self.OnImageSelected)
         self._images.add_image_deselect_notify(self.OnImageDeselected)
@@ -219,7 +269,7 @@ class MyFrame(wx.Frame):
                     fn(*args, **kwargs)
                 try:
                     fn, args, kwargs = self._workerQueue.get_nowait()
-                except Queue.Empty:
+                except queue.Empty:
                     self._working = False
 
     # Method to pass work to the worker thread using the same pattern as
@@ -233,11 +283,14 @@ class MyFrame(wx.Frame):
     # This method polls whether the working thread is busy and pulses the
     # status bar progress indicator while that it true
     def _PulseProgress(self):
+        if self._closing:
+            # The frame is being destroyed so stop polling
+            return
         while not self._closing:
             try:
                 fn, args, kwargs = self._checkQueue.get_nowait()
                 fn(*args, **kwargs)
-            except Queue.Empty:
+            except queue.Empty:
                 break
 
         if self._working or self._importing:
@@ -252,11 +305,11 @@ class MyFrame(wx.Frame):
         exiftool = "exiftool"
         path = self._optionsDialog.options["ExiftoolPath"]
         if path != "":
-            exiftool = os.path.join(path, exiftool)
+            exiftool = str(Path(path, exiftool))
         if self._exiftoolChecked != exiftool:
-            error = False    
+            error = False
             try:
-                p = Popen([exiftool, "-ver"], stdin = PIPE, stdout = PIPE, stderr = STDOUT)
+                p = Popen([exiftool, "-ver"], stdin=PIPE, stdout=PIPE, stderr=STDOUT)
                 stdout, stderr = p.communicate()
             except OSError:
                 error = True
@@ -268,20 +321,21 @@ class MyFrame(wx.Frame):
                     "to run exiftool. Please ensure that you have EXIFtool on this PC\n"
                     "and that the configuration (e.g. path in Tools->Options) is correct",
                     "Configuration problem",
-                    style = wx.OK | wx.ICON_ERROR).ShowModal()
+                    style=wx.OK | wx.ICON_ERROR,
+                ).ShowModal()
                 return False
             self._exiftoolChecked = exiftool
-            
+
         return True
 
-################################################################################
-####
-#### Load GPS files
-####
-################################################################################
+    ################################################################################
+    ####
+    #### Load GPS files
+    ####
+    ################################################################################
 
     def _add_gps_file(self, gpsFile):
-        text = os.path.basename(gpsFile.get_filename())
+        text = Path(gpsFile.get_filename()).name
         item, cookie = self._gpxTree.GetFirstChild(self._gpxRoot)
         n = 0
         while item.IsOk() and text <= self._gpxTree.GetItemText(item):
@@ -292,15 +346,15 @@ class MyFrame(wx.Frame):
         else:
             item = self._gpxTree.AppendItem(self._gpxRoot, text)
         wrappedGpsFile = GpsFileCache(gpsFile)
-        # Note that the PyData is:
+        # Note that the item data is:
         # 1: The object for the whole file
         # 2: The indices of the sub-tracks to which this element corresponds
         # 3: A placeholder for the cached track array
         # 4: A placeholder for the cached region
-        self._gpxTree.SetPyData(item, (wrappedGpsFile, range(len(gpsFile))))
+        self._gpxTree.SetItemData(item, (wrappedGpsFile, list(range(len(gpsFile)))))
         for n, t in enumerate(gpsFile):
             subitem = self._gpxTree.AppendItem(item, "%s - %s" % (str(t[0][0]), str(t[-1][0])))
-            self._gpxTree.SetPyData(subitem, (wrappedGpsFile, [n]))
+            self._gpxTree.SetItemData(subitem, (wrappedGpsFile, [n]))
 
         # TODO: Now check whether there are any images to geotag
 
@@ -309,21 +363,21 @@ class MyFrame(wx.Frame):
             wx.CallAfter(self._add_gps_file, t)
 
     def OnLoadGpsFiles(self, event):
-        dlg = wx.DirDialog(self, style = wx.DD_DIR_MUST_EXIST, defaultPath = "/home/steve/GPSTracks/")
+        dlg = wx.DirDialog(self, style=wx.DD_DIR_MUST_EXIST, defaultPath="/home/steve/GPSTracks/")
         if dlg.ShowModal() == wx.ID_OK:
             self._do_work(self._load_gps_files_work, dlg.GetPath())
 
-# End the "load GPS files" operation
+    # End the "load GPS files" operation
 
-################################################################################
-####
-#### Load images
-####
-################################################################################
+    ################################################################################
+    ####
+    #### Load images
+    ####
+    ################################################################################
 
     def _add_image(self, img):
         if img["FileType"] == "JPG" and img["Orientation"] != "1":
-            print img.get_filename(), "is not orientation 1"
+            print(img.get_filename(), "is not orientation 1")
 
         # TODO: Check whether this image is geotagged by any of the GPS files
         self._images.add_image(img)
@@ -333,27 +387,24 @@ class MyFrame(wx.Frame):
         include = self._optionsDialog.options["ImageExtensions"]
         if len(include) == 0:
             include = None
-        for i in gen_images_from_files(
-                path,
-                include = include,
-                exiftool = self._exiftoolChecked):
+        for i in gen_images_from_files(path, include=include, exiftool=self._exiftoolChecked):
             wx.CallAfter(self._statusBar.SetStatusText, "Loading " + i["FileName"])
             wx.CallAfter(self._add_image, i)
 
     def OnLoadImages(self, event):
         if not self._exiftool_check():
             return
-        dlg = wx.DirDialog(self, style = wx.DD_DIR_MUST_EXIST, defaultPath = "/home/steve/Master/")
+        dlg = wx.DirDialog(self, style=wx.DD_DIR_MUST_EXIST, defaultPath="/home/steve/Master/")
         if dlg.ShowModal() == wx.ID_OK:
             self._do_work(self._load_file_work, dlg.GetPath())
 
-# End the "load images" operation
+    # End the "load images" operation
 
-################################################################################
-####
-#### Import files
-####
-################################################################################
+    ################################################################################
+    ####
+    #### Import files
+    ####
+    ################################################################################
 
     # This function is run as a seperate thread to automatically batch the files
     # to exiftool to improve performance
@@ -362,7 +413,7 @@ class MyFrame(wx.Frame):
             files = []
             try:
                 filename = self._importQueue.get_nowait()
-            except Queue.Empty:
+            except queue.Empty:
                 self._importing = False
                 filename = self._importQueue.get()
             self._importing = True
@@ -371,49 +422,35 @@ class MyFrame(wx.Frame):
                 try:
                     timeout = 0.5
                     while True:
-                        filename = self._importQueue.get(block = timeout > 0, timeout = timeout)
+                        filename = self._importQueue.get(block=timeout > 0, timeout=timeout)
                         if filename is not None:
                             files.append(filename)
                             timeout -= 0.1
                         else:
                             break
-                except Queue.Empty:
-                    for i in gen_images_from_files(files, exiftool = self._exiftoolChecked):
+                except queue.Empty:
+                    for i in gen_images_from_files(files, exiftool=self._exiftoolChecked):
                         wx.CallAfter(self._statusBar.SetStatusText, "Loading " + i["FileName"])
                         wx.CallAfter(self._add_image, i)
 
-    def _copy_file_work(self, f, dirpath, workingDir, ext, process, useJpegtran, jpegexiforient, jpegtran):
+    def _copy_file_work(self, f, dirpath, workingDir, ext, process, useJpegtran, jpegtran):
         wx.CallAfter(self._statusBar.SetStatusText, "Importing " + f)
-        srcFile = os.path.join(dirpath, f)
-        destFile = os.path.join(workingDir, f)
-        if os.path.exists(destFile):
+        srcFile = dirpath / f
+        destFile = workingDir / f
+        if destFile.exists():
             # User must have OK'd this so delete the destination file then copy the new one into place
-            os.remove(destFile)
+            destFile.unlink()
         shutil.copy(srcFile, workingDir)
         if process and ext in [".jpg", ".jpeg"] and useJpegtran:
             # losslessly rotate
-            p = Popen([jpegexiforient, "-n", destFile], stdin = PIPE, stdout = PIPE, stderr = PIPE)
-            stdout, stderr = p.communicate()
-            try:
-                orient = int(stdout)
-            except ValueError:
-                # No orientation flag? Set orient to the value that prevents any further work
-                orient = 1
-            if orient > 1:
-                wx.CallAfter(self._statusBar.SetStatusText, "Importing %s (losslessly rotating)" % f)
-                print destFile, "- using option:", _jpegtranOptions[orient]
-                tmpFile = destFile + ".pgtips~.jpg"
-                p = Popen([jpegtran, "-copy", "all"] + _jpegtranOptions[orient] + ["-outfile", tmpFile, destFile],
-                          stdin = PIPE, stdout = PIPE, stderr = PIPE)
-                stdout, stderr = p.communicate()
-                assert p.returncode == 0, "jpegtran failed: " + stderr
-                
-                p = Popen([jpegexiforient, "-1", tmpFile], stdin = PIPE, stdout = PIPE, stderr = PIPE)
-                stdout, stderr = p.communicate()
-                assert p.returncode == 0, "jpegexiforient failed: " + stderr
-
-                os.remove(destFile)
-                os.rename(tmpFile, destFile)
+            orient = read_orientation(destFile, self._exiftoolChecked)
+            # No (or an invalid) orientation flag means that there is nothing to correct
+            if orient is not None and 1 < orient < len(_jpegtranOptions):
+                wx.CallAfter(
+                    self._statusBar.SetStatusText, "Importing %s (losslessly rotating)" % f
+                )
+                print(destFile, "- using option:", _jpegtranOptions[orient])
+                _lossless_rotate(destFile, orient, jpegtran, self._exiftoolChecked)
 
         if process:
             # Now that the file is where it needs to be, load the file
@@ -422,42 +459,48 @@ class MyFrame(wx.Frame):
                 self._importQueue.put(destFile)
             else:
                 wx.CallAfter(self._statusBar.SetStatusText, "Loading " + f)
-                for i in gen_images_from_files(destFile, exiftool = self._exiftoolChecked):
+                for i in gen_images_from_files(destFile, exiftool=self._exiftoolChecked):
                     wx.CallAfter(self._add_image, i)
 
-    def _copy_file_overwrite_check(self, f, dirpath, workingDir, ext, process, useJpegtran, jpegexiforient, jpegtran):
-        if wx.MessageBox(
+    def _copy_file_overwrite_check(
+        self, f, dirpath, workingDir, ext, process, useJpegtran, jpegtran
+    ):
+        if (
+            wx.MessageBox(
                 "%s already exists in %s; overwrite?" % (f, workingDir),
                 "File exists",
                 wx.YES_NO,
-                self) == wx.YES:
-            self._do_work(self._copy_file_work,
-                          f,
-                          dirpath,
-                          workingDir,
-                          ext,
-                          process,
-                          useJpegtran,
-                          jpegexiforient,
-                          jpegtran)
+                self,
+            )
+            == wx.YES
+        ):
+            self._do_work(
+                self._copy_file_work,
+                f,
+                dirpath,
+                workingDir,
+                ext,
+                process,
+                useJpegtran,
+                jpegtran,
+            )
 
-    def _import_files_work(self, fromDir, workingDir, useJpegtran, jpegexiforient, jpegtran, emptyWorkingDir):
+    def _import_files_work(self, fromDir, workingDir, useJpegtran, jpegtran, emptyWorkingDir):
         if emptyWorkingDir:
-            wx.CallAfter(self._statusBar.SetStatusText, "Deleting files in " + workingDir)
-            files = os.listdir(workingDir)
-            for f in files:
-                print "Deleting", os.path.join(workingDir, f)
-                os.remove(os.path.join(workingDir, f))
+            wx.CallAfter(self._statusBar.SetStatusText, "Deleting files in %s" % workingDir)
+            for f in list(workingDir.iterdir()):
+                print("Deleting", f)
+                f.unlink()
 
         other = self._optionsDialog.options["OtherExtensions"]
         image = self._optionsDialog.options["ImageExtensions"]
-        
+
         wx.CallAfter(self._statusBar.SetStatusText, "Searching for files to import...")
 
         # Walk and copy files to working dir
-        for dirpath, dirnames, filenames in os.walk(fromDir):
+        for dirpath, dirnames, filenames in fromDir.walk():
             for f in filenames:
-                ext = os.path.splitext(f)[1].lower()
+                ext = Path(f).suffix.lower()
                 copy = False
                 process = False
                 if ext in other or len(other) == 0:
@@ -466,47 +509,42 @@ class MyFrame(wx.Frame):
                     copy = True
                     process = True
                 if copy:
-                    destFile = os.path.join(workingDir, f)
-                    if os.path.exists(destFile):
-                        self._do_check(self._copy_file_overwrite_check,
-                                       f,
-                                       dirpath,
-                                       workingDir,
-                                       ext,
-                                       process,
-                                       useJpegtran,
-                                       jpegexiforient,
-                                       jpegtran)
+                    destFile = workingDir / f
+                    if destFile.exists():
+                        self._do_check(
+                            self._copy_file_overwrite_check,
+                            f,
+                            dirpath,
+                            workingDir,
+                            ext,
+                            process,
+                            useJpegtran,
+                            jpegtran,
+                        )
                     else:
-                        self._do_work(self._copy_file_work,
-                                      f,
-                                      dirpath,
-                                      workingDir,
-                                      ext,
-                                      process,
-                                      useJpegtran,
-                                      jpegexiforient,
-                                      jpegtran)
+                        self._do_work(
+                            self._copy_file_work,
+                            f,
+                            dirpath,
+                            workingDir,
+                            ext,
+                            process,
+                            useJpegtran,
+                            jpegtran,
+                        )
 
     def OnImport(self, event):
         if not self._exiftool_check():
             return
         useJpegtran = self._optionsDialog.options["JpegtranEnabled"]
         jpegtran = "jpegtran"
-        jpegexiforient = "jpegexiforient"
         if useJpegtran:
             error = False
             path = self._optionsDialog.options["JpegtranPath"]
             if path != "":
-                jpegtran = os.path.join(path, jpegtran)
-                jpegexiforient = os.path.join(path, jpegexiforient)
+                jpegtran = str(Path(path, jpegtran))
             try:
-                p = Popen([jpegtran, "-v"], stdin = PIPE, stdout = PIPE, stderr = STDOUT)
-                stdout, stderr = p.communicate()
-            except OSError:
-                error = True
-            try:
-                p = Popen([jpegexiforient, "--help"], stdin = PIPE, stdout = PIPE, stderr = STDOUT)
+                p = Popen([jpegtran, "-v"], stdin=PIPE, stdout=PIPE, stderr=STDOUT)
                 stdout, stderr = p.communicate()
             except OSError:
                 error = True
@@ -514,142 +552,156 @@ class MyFrame(wx.Frame):
                 response = wx.MessageDialog(
                     self,
                     "PGTips is configured to use jpegtran but it was not able to\n"
-                    "execute jpegtran and/or jpegexiforient. This means that it\n"
-                    "will not be possible to automatically rotate any JPEG files\n"
-                    "during import\n\n"
+                    "execute it. This means that it will not be possible to\n"
+                    "automatically rotate any JPEG files during import\n\n"
                     "Do you want to continue importing?",
                     "Configuration problem",
-                    style = wx.YES_NO | wx.YES_DEFAULT | wx.ICON_QUESTION).ShowModal()
+                    style=wx.YES_NO | wx.YES_DEFAULT | wx.ICON_QUESTION,
+                ).ShowModal()
                 if response == wx.ID_NO:
                     return
                 else:
                     useJpegtran = False
 
-        dlg = wx.DirDialog(self, style = wx.DD_DIR_MUST_EXIST, defaultPath = "/home/steve/Master/")
+        dlg = wx.DirDialog(self, style=wx.DD_DIR_MUST_EXIST, defaultPath="/home/steve/Master/")
         if dlg.ShowModal() == wx.ID_OK:
-            workingDir = self._optionsDialog.options["WorkingDir"]
+            workingDir = Path(self._optionsDialog.options["WorkingDir"])
             emptyWorkingDir = False
-            if not os.path.isdir(workingDir):
+            if not workingDir.is_dir():
                 try:
-                    os.makedirs(workingDir)
+                    workingDir.mkdir(parents=True)
                 except OSError:
-                    wx.MessageBox("Unable to create " + workingDir, "Error", style = wx.ICON_ERROR)
+                    wx.MessageBox("Unable to create %s" % workingDir, "Error", style=wx.ICON_ERROR)
                     return
             else:
-                files = os.listdir(workingDir)
-                if len(files) > 0:
+                if any(workingDir.iterdir()):
                     response = wx.MessageDialog(
                         self,
                         "The working directory is not empty.\n\n"
                         "Do you want to delete the current contents before importing?",
                         "Working directory not empty",
-                        style = wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION).ShowModal()
+                        style=wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+                    ).ShowModal()
                     if response == wx.ID_YES:
                         emptyWorkingDir = True
 
-            self._do_work(self._import_files_work,
-                          dlg.GetPath(), workingDir,
-                          useJpegtran, jpegexiforient, jpegtran,
-                          emptyWorkingDir)
+            self._do_work(
+                self._import_files_work,
+                Path(dlg.GetPath()),
+                workingDir,
+                useJpegtran,
+                jpegtran,
+                emptyWorkingDir,
+            )
 
+    # End the "import files" operation
 
-# End the "import files" operation
-
-################################################################################
-####
-#### Export files
-####
-################################################################################
+    ################################################################################
+    ####
+    #### Export files
+    ####
+    ################################################################################
 
     def _export_file_overwrite(self, f, exportDir, srcFile):
-        dest = os.path.join(exportDir, f)
-        wx.CallAfter(self._statusBar.SetStatusText, "Removing " + dest)
-        os.remove(dest)
+        dest = exportDir / f
+        wx.CallAfter(self._statusBar.SetStatusText, "Removing %s" % dest)
+        dest.unlink()
 
         wx.CallAfter(self._statusBar.SetStatusText, "Exporting " + f)
         shutil.move(srcFile, exportDir)
 
     def _export_file_overwrite_check(self, f, exportDir, srcFile):
-        if wx.MessageBox(
+        if (
+            wx.MessageBox(
                 "%s already exists in %s; overwrite?" % (f, exportDir),
                 "File exists",
                 wx.YES_NO,
-                self) == wx.YES:
+                self,
+            )
+            == wx.YES
+        ):
             self._do_work(self._export_file_overwrite, f, exportDir, srcFile)
 
-    def _export_file_work(self, dirpath, f):
+    def _export_file_work(self, dirpath, f, loadedImages):
         images = self._optionsDialog.options["ImageExtensions"]
         other = self._optionsDialog.options["OtherExtensions"]
 
-        ext = os.path.splitext(f)[1].lower()
-        srcFile = os.path.abspath(os.path.join(dirpath, f))
+        ext = Path(f).suffix.lower()
+        srcFile = (dirpath / f).absolute()
         img = None
         exportDatetime = None
         if ext in images or len(images) == 0:
-            for img in self._images.iter_images():
-                if os.path.abspath(img.get_filename()) == srcFile:
+            for img in loadedImages:
+                if Path(img.get_filename()).absolute() == srcFile:
                     wx.CallAfter(self._images.rm_image, img)
                     break
             else:
-                img = list(gen_images_from_files(srcFile, exiftool = self._exiftoolChecked))[0]
+                img = list(gen_images_from_files(srcFile, exiftool=self._exiftoolChecked))[0]
             exportDatetime = img.dateTime
         if exportDatetime is None and (ext in other or len(other) == 0):
-            otherFile = list(gen_images_from_files(srcFile, exiftool = self._exiftoolChecked))[0]
+            otherFile = list(gen_images_from_files(srcFile, exiftool=self._exiftoolChecked))[0]
             exportDatetime = otherFile.dateTime
-            print f, exportDatetime
+            print(f, exportDatetime)
             assert exportDatetime is not None
-            # exportDatetime = datetime.datetime.fromtimestamp(os.stat(srcFile).st_ctime)
+            # exportDatetime = datetime.datetime.fromtimestamp(srcFile.stat().st_ctime)
         if exportDatetime is not None:
-            exportDir = os.path.join(self._optionsDialog.options["FilingDir"],
-                                     exportDatetime.strftime(self._optionsDialog.options["FilingStruct"]))
-            if not os.path.isdir(exportDir):
-                os.makedirs(exportDir)
-            if os.path.exists(os.path.join(exportDir, f)):
+            exportDir = Path(
+                self._optionsDialog.options["FilingDir"],
+                exportDatetime.strftime(self._optionsDialog.options["FilingStruct"]),
+            )
+            exportDir.mkdir(parents=True, exist_ok=True)
+            if (exportDir / f).exists():
                 self._do_check(self._export_file_overwrite_check, f, exportDir, srcFile)
             else:
                 wx.CallAfter(self._statusBar.SetStatusText, "Exporting " + f)
                 shutil.move(srcFile, exportDir)
 
     def OnExport(self, event):
-        fromDir = self._optionsDialog.options["WorkingDir"]
-        
+        fromDir = Path(self._optionsDialog.options["WorkingDir"])
+
+        loadedImages = list(self._images.iter_images())
+
         # Walk and copy files to working dir
-        for dirpath, dirnames, filenames in os.walk(fromDir):
+        for dirpath, dirnames, filenames in fromDir.walk():
             for f in filenames:
-                self._do_work(self._export_file_work, dirpath, f)
+                self._do_work(self._export_file_work, dirpath, f, loadedImages)
 
-# End the "export files" operation
+    # End the "export files" operation
 
-################################################################################
-####
-#### Geotag all files
-####
-################################################################################
+    ################################################################################
+    ####
+    #### Geotag all files
+    ####
+    ################################################################################
 
-    def _geotag_work(self, img):
+    def _geotag_work(self, img, gpsFiles):
         wx.CallAfter(self._statusBar.SetStatusText, "Geotagging " + img["FileName"])
-        geotag = img.geotag
+        geotag = None
 
-        item, cookie = self._gpxTree.GetFirstChild(self._gpxRoot)
-        while item.IsOk():
-            tracks, n = self._gpxTree.GetPyData(item)
-            geotag = tracks.gpsFile.match_time(img.dateTime)
-            if geotag is not None:
-                break
-            item, cookie = self._gpxTree.GetNextChild(self._gpxRoot, cookie)
+        if img.dateTime is not None:
+            for gpsFile in gpsFiles:
+                geotag = gpsFile.match_time(img.dateTime)
+                if geotag is not None:
+                    break
 
-        print img["FileName"], "taken at", geotag
+        print(img["FileName"], "taken at", geotag)
         if geotag is not None:
             img.set_geotag(geotag)
             wx.CallAfter(self._images.update_image, img)
             img.save_changes()
 
     def OnGeotagAll(self, event):
-        print "Geotag All"
+        print("Geotag All")
+        gpsFiles = []
+        item, cookie = self._gpxTree.GetFirstChild(self._gpxRoot)
+        while item.IsOk():
+            tracks, n = self._gpxTree.GetItemData(item)
+            gpsFiles.append(tracks.gpsFile)
+            item, cookie = self._gpxTree.GetNextChild(self._gpxRoot, cookie)
         for img in self._images.iter_images():
-            self._do_work(self._geotag_work, img)
+            self._do_work(self._geotag_work, img, gpsFiles)
 
-# End the "geotag all files" operation
+    # End the "geotag all files" operation
 
     def OnOptions(self, event):
         self._optionsDialog.ShowModal()
@@ -660,21 +712,22 @@ class MyFrame(wx.Frame):
                 self._slipMap.RemoveTrack(t)
             self._tracks = []
             item = self._gpxTree.GetSelection()
-            wrappedGpsFile, ns = self._gpxTree.GetPyData(item)
+            wrappedGpsFile, ns = self._gpxTree.GetItemData(item)
             tracks = []
             for n in ns:
                 t = wrappedGpsFile.get_track(n)
                 tracks.append(t)
             self._tracks += tracks
             region = reduce(lambda x, y: x + y.get_region(), tracks, slippy.Region())
-            map(self._slipMap.AddTrack, tracks)
+            for t in tracks:
+                self._slipMap.AddTrack(t)
             self._slipMap.ShowRegion(region)
 
     def OnImageSelected(self, img):
-        print "Selected", img.get_filename()
+        print("Selected", img.get_filename())
         geotag = img.geotag
         if geotag is not None:
-            m = slippy.Marker(img, geotag[0], geotag[1], movable = False)
+            m = slippy.Marker(img, geotag[0], geotag[1], movable=False)
             try:
                 self._slipMap.RemoveMarker(self._markers[img])
             except KeyError:
@@ -684,7 +737,7 @@ class MyFrame(wx.Frame):
             self._slipMap.CentreMap(geotag[0], geotag[1])
 
     def OnImageDeselected(self, img):
-        print "Deselected", img.get_filename()
+        print("Deselected", img.get_filename())
         try:
             self._slipMap.RemoveMarker(self._markers[img])
             del self._markers[img]
@@ -711,15 +764,18 @@ class MyFrame(wx.Frame):
         self.Destroy()
 
 
-app = wx.App(False)
-frame = MyFrame(None)
-frame.Show()
+def main():
+    app = wx.App(False)
+    frame = MyFrame(None)
+    frame.Show()
 
-# Looks like this workaround is necessary to get this to work on windows
-if frame._fullscreen:
-    frame.ShowFullScreen(True, wx.FULLSCREEN_NOBORDER | wx.FULLSCREEN_NOCAPTION)
+    # Looks like this workaround is necessary to get this to work on windows
+    if frame._fullscreen:
+        frame.ShowFullScreen(True, wx.FULLSCREEN_NOBORDER | wx.FULLSCREEN_NOCAPTION)
 
-#print wx.GetDisplaySize()
-app.MainLoop()
+    # print(wx.GetDisplaySize())
+    app.MainLoop()
 
 
+if __name__ == "__main__":
+    main()

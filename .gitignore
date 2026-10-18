@@ -3,3 +3,4 @@
 *.swp
 # Temporarily avoid mentioning the tile cache (until it is moved somewhere else)
 cloudmade*
+openstreetmap.org/

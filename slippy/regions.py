@@ -13,11 +13,12 @@ class ManagedMembers(object):
         else:
             raise AttributeError("Unable to get %s" % key)
 
+
 class Point(ManagedMembers):
     _ACCESSIBLE_MEMBERS = [
-            "lat",
-            "long",
-            ]
+        "lat",
+        "long",
+    ]
 
     def __init__(self, lat, long_):
         # Clip to maximum and minimum values
@@ -28,8 +29,9 @@ class Point(ManagedMembers):
     def __repr__(self):
         return "Point(%+g, %+g)" % (self._lat, self._long)
 
+
 class Region(object):
-    def __init__(self, nw = None, se = None):
+    def __init__(self, nw=None, se=None):
         if nw is not None:
             self._nw = Point(nw.lat, nw.long)
         else:
@@ -44,7 +46,7 @@ class Region(object):
 
     def _is_type1(self):
         """Type 1 is a region not spanning the wrap point at +/- 180 degrees
-           Type 2 does span that wrap"""
+        Type 2 does span that wrap"""
         return self._nw.long <= self._se.long
 
     def __add__(self, other):
@@ -66,7 +68,9 @@ class Region(object):
                 other._nw, other._se
                 addRegion = True
             except AttributeError:
-                raise TypeError("Don't know how to add a %s to a Region" % other.__class__.__name__)
+                raise TypeError(
+                    "Don't know how to add a %s to a Region" % other.__class__.__name__
+                )
 
         if addPoint:
             self._add_point(other)
@@ -98,9 +102,11 @@ class Region(object):
 
                 if needChange:
                     eDiff = point.long - e
-                    if eDiff < 0: eDiff += 360
+                    if eDiff < 0:
+                        eDiff += 360
                     wDiff = w - point.long
-                    if wDiff < 0: wDiff += 360
+                    if wDiff < 0:
+                        wDiff += 360
                     if eDiff < wDiff:
                         e = point.long
                     else:
@@ -156,9 +162,11 @@ class Region(object):
             #  3 (disjoint regions)
             if count == 3:
                 eDiff = r._se.long - e
-                if eDiff < 0: eDiff += 360
+                if eDiff < 0:
+                    eDiff += 360
                 wDiff = w - r._nw.long
-                if wDiff < 0: wDiff += 360
+                if wDiff < 0:
+                    wDiff += 360
                 if eDiff < wDiff:
                     count = 2
                 else:
@@ -175,7 +183,7 @@ class Region(object):
                     self._nw = Point(n, w)
                     self._se = Point(s, e)
 
-            # OK, it just remains to expand the region on the longitude 
+            # OK, it just remains to expand the region on the longitude
             if count == 1:
                 self._add_point(region._nw)
             elif count == 2:
@@ -193,12 +201,16 @@ class Region(object):
                 # Try for a Region style object
                 # The NW and SE points must both be in this region but neither of this region's
                 # NW nor SE may be in the other's
-                return (item._nw in self and
-                        item._se in self and
-                        self._nw not in item and
-                        self._se not in item) or (item._nw == self._nw and item._se == self._se)
+                return (
+                    item._nw in self
+                    and item._se in self
+                    and self._nw not in item
+                    and self._se not in item
+                ) or (item._nw == self._nw and item._se == self._se)
             except AttributeError:
-                raise TypeError("Don't know how to test for a %s in a Region" % item.__class__.__name__)
+                raise TypeError(
+                    "Don't know how to test for a %s in a Region" % item.__class__.__name__
+                )
 
     def crosses_lat(self, lat):
         if self._nw is None:
@@ -214,7 +226,7 @@ class Region(object):
         else:
             # Type 2 region
             return long_ >= self._nw.long or long_ <= self._se.long
-    
+
     def get_centre(self):
         lat = (self._nw.lat + self._se.lat) / 2
         long_ = (self._nw.long + self._se.long) / 2
@@ -224,14 +236,17 @@ class Region(object):
                 long_ += 360
         return Point(lat, long_)
 
+
 if __name__ == "__main__":
-    def test(cmd, prefix = None):
+
+    def test(cmd, prefix=None):
         if prefix is not None:
-            print prefix,
-        print cmd, "=>",
+            print(prefix, end=" ")
+        print(cmd, "=>", end=" ")
         retval = eval(cmd)
-        print retval
+        print(retval)
         return retval
+
     r = test("Region()", "r =")
     p = test("Point(50, -4)", "p =")
     r = test("r + p", "r =")
@@ -243,4 +258,3 @@ if __name__ == "__main__":
     test("Region(Point(51, 179), Point(50, -179)) + Region(Point(51.5, 178), Point(50.5, -179.5))")
     test("Region(Point(51, 179), Point(50, -179)) + Region(Point(51.5, 179.5), Point(50.5, 178))")
     test("Region(Point(51, 100), Point(50, -100)) + Region(Point(51.5, -120), Point(50.5, 120))")
-

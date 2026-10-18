@@ -24,28 +24,27 @@ Depedencies
 -----------
 
 I've tried to keep the dependencies as few as possible.
-* The application is written in Python - developed using 2.7 but I have briefly run it with 2.6 and didn't hit any problems.
-* It uses the wxPython GUI framework, so you will need to have that too.
+* The application is written in Python and requires Python 3.12 or later.
+* It uses the wxPython GUI framework (version 4, a.k.a. "Phoenix"), so you will need to have that too.
 * It uses the fantastic EXIFTool for image EXIF querying and setting.
 
 It also has the following optional dependencies:
-* To support lossless rotation of JPEG images, you will need the jpegtran and jpegexiforient executables.
+* To support lossless rotation of JPEG images, you will need the jpegtran executable.
 
 That's it!
 
-For Ubuntu (and similar Linux distros), you probably need something like the following packages: python2.7, python-wxgtk2.8, libimage-exiftool-perl and libjpeg-turbo-progs.
+For Ubuntu (and similar Linux distros), you probably need something like the following packages: python3, python3-wxgtk4.0, libimage-exiftool-perl and libjpeg-turbo-progs.
 
 For Windows, you should be able to find the applications that you need from the follwoing links:
 * Python: http://www.python.org/download/
-* wxPython: http://www.wxpython.org/download.php
-* EXIFTool: http://www.sno.phy.queensu.ca/~phil/exiftool/ (Note that the downloaded executable needs to be renamed to exiftool.exe for PGTips to use it)
+* wxPython: https://wxpython.org/pages/downloads/ (or `pip install wxPython`)
+* EXIFTool: https://exiftool.org/ (Note that the downloaded executable needs to be renamed to exiftool.exe for PGTips to use it)
 * jpegtran: http://jpegclub.org/jpegtran/
-* jpegexiforient: https://github.com/CiderMan/jpegexiforient
 
 Running it
 ----------
 
-Once you have the dependencies installed, clone the repository and run pgtips.py. You will probably want to go to Tools->Options and configure a few things, including the working and export directories, the file extensions to process and the paths to exiftool and jpegtran (if they are not in your path).
+Once you have the dependencies installed, clone the repository and run `python3 pgtips.py`. You will probably want to go to Tools->Options and configure a few things, including the working and export directories, the file extensions to process and the paths to exiftool and jpegtran (if they are not in your path).
 
 * To import files into your working directory, use File->Import files...
 * File->Load GPS files will do what the option says, though note that only GPX and TCX files are currently supported.
@@ -53,6 +52,13 @@ Once you have the dependencies installed, clone the repository and run pgtips.py
 * File->Export files will export the files in the working directory to a directory structure (based on when the photo was taken) of your choosing.
 
 There are lots of incomplete, ir even completely missing, features - not to mention bugs. Please feel free to raise any of these as issues... epecially if you want to help implement or fix them!
+
+Map tiles come from [OpenStreetMap](https://www.openstreetmap.org/copyright) and are cached in an `openstreetmap.org` directory under the directory that PGTips is run from. Please respect the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
+
+Running the tests
+-----------------
+
+From the top of the repository, run `python3 -m unittest`. Tests that need a display or exiftool are skipped if they are not available.
 
 *** Please note: this is immature software. Use at your own risk and, in particular, ensure that it has not damaged the copies of your files before deleting the originals ***
 
