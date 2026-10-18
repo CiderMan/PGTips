@@ -9,11 +9,11 @@ class GetCoordinateTest(unittest.TestCase):
         self.assertEqual(_get_coordinate(0, 0, 1), (_TILE_SIZE, _TILE_SIZE))
 
     def test_west_edge(self):
-        x, y = _get_coordinate(0, -180, 3)
+        x, _y = _get_coordinate(0, -180, 3)
         self.assertEqual(x, 0)
 
     def test_web_mercator_limit_is_top_edge(self):
-        x, y = _get_coordinate(85.0511287798, 0, 0)
+        _x, y = _get_coordinate(85.0511287798, 0, 0)
         self.assertEqual(y, 0)
 
     def test_returns_ints(self):

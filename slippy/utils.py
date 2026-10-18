@@ -1,9 +1,4 @@
-from math import *
-
-__all__ = [
-    "_TILE_SIZE",
-    "_get_coordinate",
-]
+from math import cos, log, pi, radians, tan
 
 _TILE_SIZE = 256
 

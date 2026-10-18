@@ -1,9 +1,11 @@
-from math import *
 from functools import reduce
-from .utils import *
-from .regions import Point, Region
-import wx
+from math import atan, cos, log, modf, pi, radians, sinh, tan
 from pathlib import Path
+
+import wx
+
+from .regions import Point, Region
+from .utils import _TILE_SIZE, _get_coordinate
 
 _DEFAULT_ZOOM = 15
 
@@ -51,11 +53,11 @@ class SlippyPanel(wx.Panel):
             self._cache = kwargs["cache"]
             del kwargs["cache"]
         except KeyError:
-            raise Exception("No cache specified in SlippyPanel constructor")
+            raise TypeError("No cache specified in SlippyPanel constructor") from None
 
         wx.Panel.__init__(self, *args, **kwargs)
 
-        if "size" not in kwargs.keys():
+        if "size" not in kwargs:
             self.SetSize((2 * _TILE_SIZE, 2 * _TILE_SIZE))
         self._bitmapZoom = 0
         self._bitmaps = {}
@@ -64,8 +66,8 @@ class SlippyPanel(wx.Panel):
         self._pollTimer = wx.Timer(self, -1)
 
         # start with the single zoom 0 tile centred on the panel
+        # Zoom = 0 so the world is a single tile
         self._zoom = 0
-        res = _TILE_SIZE  # Zoom = 0 so the world is a single tile
         # _tlx and _tly are the top-left co-ordinate in map space. However, the tlx value
         # is kept positive to allow wrapping
         self._tlx = _TILE_SIZE - self._size[0]
@@ -73,6 +75,7 @@ class SlippyPanel(wx.Panel):
 
         self._markers = []
         self._activeMarker = None
+        self._activeMarkerXy = None
 
         self._tracks = []
 
@@ -133,7 +136,7 @@ class SlippyPanel(wx.Panel):
         if moreAvail:
             self.Refresh()
 
-    def _region_overlaps_viewport(self, a, b, c, d):
+    def _region_overlaps_viewport(self, _left, _top, _right, _bottom):
         # TODO
         return True
 
@@ -194,10 +197,7 @@ class SlippyPanel(wx.Panel):
         viewport_region = Region(tl, br)
 
         for track in self._tracks:
-            r = track.get_region()
-            ttlx, ttly = self.get_coordinate(r._nw.lat, r._nw.long)
-            tbrx, tbry = self.get_coordinate(r._se.lat, r._se.long)
-            if r.intersects(viewport_region):
+            if track.get_region().intersects(viewport_region):
                 self._visibleTracks.append(track)
 
         self._visibleMarkers = []
@@ -225,7 +225,8 @@ class SlippyPanel(wx.Panel):
                 dc.DrawBitmap(tile, x, y, False)
 
         for track in self._visibleTracks:
-            # Add an extra point a single pixel offset from the last point as the last pixel is not drawn
+            # Add an extra point a single pixel offset from the last point as the last pixel is
+            # not drawn
             extraX, extraY = track.get_track(self._zoom)[-1]
             extraPoint = extraX + 1, extraY
             dc.DrawLines(
@@ -315,21 +316,17 @@ class SlippyPanel(wx.Panel):
 
             self._wheelDelta = delta - steps * evt.GetWheelDelta()
             if isPositive:
-                self._zoom += steps
-                if self._zoom > 18:
-                    self._zoom = 18
+                self._zoom = min(self._zoom + steps, 18)
             else:
                 self._wheelDelta = -self._wheelDelta
-                self._zoom -= steps
-                if self._zoom < 0:
-                    self._zoom = 0
+                self._zoom = max(self._zoom - steps, 0)
 
             self.CentreMap(lat, long, point=where)
 
     def OnLeftDown(self, evt):
         needRefresh = False
         evtPos = evt.GetPosition()
-        p = None
+        p = pX = pY = None
         for x, y, marker in self._visibleMarkers:
             xOffset = evtPos[0] - x
             yOffset = evtPos[1] - y
@@ -366,8 +363,7 @@ class SlippyPanel(wx.Panel):
     def GetSelectedMarker(self):
         if self._activeMarker is not None and self._activeMarker.selectable:
             return self._activeMarker
-        else:
-            return None
+        return None
 
     def RemoveMarker(self, marker):
         if self._activeMarker == marker:
@@ -407,8 +403,7 @@ class SlippyPanel(wx.Panel):
         def return_best_fit(x, y):
             if y[0] < self._size[0] and y[1] < self._size[1]:
                 return y
-            else:
-                return x
+            return x
 
         best = reduce(return_best_fit, map(get_extent, range(19)), None)
         c = region.get_centre()

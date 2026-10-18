@@ -1,15 +1,12 @@
 import json
-import tempfile
 import unittest
-from pathlib import Path
 
-from test import HAVE_DISPLAY, get_wx_app
+from test import HAVE_DISPLAY, get_wx_app, temp_dir
+from options import OptionsDialog, _split_csl
 
 
 class SplitCslTest(unittest.TestCase):
     def test_split(self):
-        from options import _split_csl
-
         self.assertEqual(_split_csl("jpg, mrw  dng,,", prefix="."), [".jpg", ".mrw", ".dng"])
         self.assertEqual(_split_csl(""), [])
 
@@ -23,18 +20,12 @@ class _Event:
 class OptionsDialogTest(unittest.TestCase):
     def setUp(self):
         get_wx_app()
-        self._tmp = tempfile.TemporaryDirectory()
-        self.optFile = Path(self._tmp.name) / "pgtips.opt"
-
-    def tearDown(self):
-        self.dialog.Destroy()
-        self._tmp.cleanup()
+        self.optFile = temp_dir(self) / "pgtips.opt"
 
     def create(self):
-        from options import OptionsDialog
-
-        self.dialog = OptionsDialog(None, optFile=str(self.optFile))
-        return self.dialog
+        dialog = OptionsDialog(None, optFile=str(self.optFile))
+        self.addCleanup(dialog.Destroy)
+        return dialog
 
     def test_defaults_without_file(self):
         d = self.create()

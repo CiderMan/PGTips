@@ -1,7 +1,8 @@
-import xml.etree.ElementTree as ET
 import datetime
-from pathlib import Path, PurePath
+import xml.etree.ElementTree as ET
 from functools import reduce
+
+from findfiles import find_all_files
 
 _DEBUG = True
 
@@ -23,7 +24,6 @@ def _gen_tracks_from_gpx_file(e):
     t = r.tag.split("}")
     assert len(t) == 2 and t[1] == "gpx", "Not a GPX file"
     uri = t[0][1:]
-    trkTag = "{%s}trk" % uri
     trksegTag = "{%s}trkseg" % uri
     trkptTag = "{%s}trkpt" % uri
     eleTag = "{%s}ele" % uri
@@ -89,7 +89,7 @@ def _gen_tracks_from_tcx_file(e):
         yield s
 
 
-def _nul(nul):
+def _nul(_ignored):
     """
     Define a "parser" for files that are unknown. It ignores its parameter
     and returns None to indicate that this is not a valid file
@@ -113,28 +113,6 @@ schemaMapping = {
 }
 
 
-def _find_all_files(files, include, exclude):
-    def wanted(f):
-        ext = f.suffix.lower()
-        return (include is None or ext in include) and (exclude is None or ext not in exclude)
-
-    fList = []
-    if isinstance(files, (str, PurePath)):
-        files = [files]
-    if _DEBUG:
-        print(files)
-
-    for path in map(Path, files):
-        if path.is_file():
-            if wanted(path):
-                fList.append(path)
-        else:
-            for dirpath, dirnames, filenames in path.walk():
-                fList += [dirpath / f for f in filenames if wanted(dirpath / f)]
-
-    return fList
-
-
 def _track_from_file(f):
     # OK, this should be a file. We'll start by looking to see if it is one of the XML formats
     try:
@@ -156,11 +134,9 @@ def _track_from_file(f):
 
 
 def gen_tracks_from_files(files, include=None, exclude=None, returnEmpty=False, pool=None):
-    if include is not None:
-        include = [e.lower() for e in include]
-    if exclude is not None:
-        exclude = [e.lower() for e in exclude]
-    files = _find_all_files(files, include, exclude)
+    if _DEBUG:
+        print(files)
+    files = find_all_files(files, include, exclude)
     if pool is None:
         iterator = map(_track_from_file, files)
     else:
@@ -175,27 +151,19 @@ def gen_tracks_from_files(files, include=None, exclude=None, returnEmpty=False, 
 
 def _gen_split_tracks(filename, tracks, splitTrackGap):
     for t in tracks:
-        if splitTrackGap is None:
+        if splitTrackGap is None or len(t) < 2:
             yield t
-        else:
-            if len(t) > 1:
-                splitPoints = []
-                for i in range(len(t) - 1):
-                    diff = (t[i + 1][0] - t[i][0]).total_seconds()
-                    assert diff >= 0
-                    if diff >= splitTrackGap:
-                        if _DEBUG:
-                            print(filename, "Splitting track at gap of %d seconds" % diff)
-                        splitPoints.append(i + 1)
-                if len(splitPoints) > 0:
-                    i = 0
-                    for pt in splitPoints:
-                        yield t[i:pt]
-                        i = pt
-                    yield t[i:]
-                    t = None
-            if t is not None:
-                yield t
+            continue
+        start = 0
+        for i in range(1, len(t)):
+            diff = (t[i][0] - t[i - 1][0]).total_seconds()
+            assert diff >= 0
+            if diff >= splitTrackGap:
+                if _DEBUG:
+                    print(filename, "Splitting track at gap of %d seconds" % diff)
+                yield t[start:i]
+                start = i
+        yield t[start:]
 
 
 def _gen_interpolate_alt(filename, tracks):
@@ -315,7 +283,7 @@ class _Tracks:
             else:
                 last = t[0]
                 for pt in t[1:]:
-                    if dateTime >= last[0] and dateTime < pt[0]:
+                    if last[0] <= dateTime < pt[0]:
                         # Check for minimum proximity?
                         matches.append((last, pt))
                         break
@@ -325,23 +293,22 @@ class _Tracks:
         if len(matches) == 0:
             # Nothing found
             return None
+        # TODO Figure out which is best if there are more than one
+        t1, t2 = matches[0]
+        if t1 is t2:
+            lat, lon, alt = t1[1:]
         else:
-            # TODO Figure out which is best if there are more than one
-            t1, t2 = matches[0]
-            if t1 is t2:
-                lat, lon, alt = t1[1:]
+            ratio = (dateTime - t1[0]).total_seconds() / (t2[0] - t1[0]).total_seconds()
+            lat1, lon1, alt1 = t1[1:]
+            lat2, lon2, alt2 = t2[1:]
+            lat = lat1 + (lat2 - lat1) * ratio
+            lon = lon1 + (lon2 - lon1) * ratio
+            if alt1 is None or alt2 is None:
+                alt = alt1 if alt2 is None else alt2
             else:
-                ratio = (dateTime - t1[0]).total_seconds() / (t2[0] - t1[0]).total_seconds()
-                lat1, lon1, alt1 = t1[1:]
-                lat2, lon2, alt2 = t2[1:]
-                lat = lat1 + (lat2 - lat1) * ratio
-                lon = lon1 + (lon2 - lon1) * ratio
-                if alt1 is None or alt2 is None:
-                    alt = alt1 if alt2 is None else alt2
-                else:
-                    alt = alt1 + (alt2 - alt1) * ratio
+                alt = alt1 + (alt2 - alt1) * ratio
 
-            return lat, lon, alt
+        return lat, lon, alt
 
 
 class _TrackProxy:
@@ -378,10 +345,10 @@ if __name__ == "__main__":
     # import multiprocessing
 
     # pool = multiprocessing.Pool()
-    files = gen_tracks_from_files(["GPSTracks", "missing.gpx"])  # , pool = pool)
+    gpsFiles = gen_tracks_from_files(["GPSTracks", "missing.gpx"])  # , pool = pool)
 
     dt = datetime.datetime(2010, 9, 2, 10, 0, 0)
-    for g in files:
+    for g in gpsFiles:
         print(g._filename)
         print(g.match_time(dt, utcOffsetHours=0))
 

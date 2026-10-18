@@ -1,8 +1,12 @@
-import sys, datetime, re
-from pathlib import Path, PurePath
+import datetime
+import re
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
-from subprocess import Popen, PIPE
+from pathlib import Path
+from subprocess import DEVNULL, PIPE, Popen
+
+from findfiles import find_all_files
 
 _DEBUG = True
 
@@ -11,26 +15,8 @@ class ExiftoolException(Exception):
     pass
 
 
-def _find_all_files(files, include, exclude):
-    def wanted(f):
-        ext = f.suffix.lower()
-        return (include is None or ext in include) and (exclude is None or ext not in exclude)
-
-    fList = []
-    if isinstance(files, (str, PurePath)):
-        files = [files]
-    if _DEBUG:
-        print(files)
-
-    for path in map(Path, files):
-        if path.is_file():
-            if wanted(path):
-                fList.append(path)
-        else:
-            for dirpath, dirnames, filenames in path.walk():
-                fList += [dirpath / f for f in filenames if wanted(dirpath / f)]
-
-    return fList
+class AmbiguousKeyError(Exception):
+    """Raised when a tag name is present in more than one namespace of a file's EXIF data"""
 
 
 _popenKwds = {}
@@ -100,10 +86,9 @@ class ExifFile:
     def __getattr__(self, attr):
         if attr in self.managedAttributes:
             return getattr(self, "_" + attr)
-        else:
-            raise AttributeError(
-                "Class %s does not have attribute %s" % (self.__class__.__name__, attr)
-            )
+        raise AttributeError(
+            "Class %s does not have attribute %s" % (self.__class__.__name__, attr)
+        )
 
     def __getitem__(self, index):
         if isinstance(index, str):
@@ -116,17 +101,15 @@ class ExifFile:
                     pass  # Not found in this namespace
             if len(found) == 0:
                 raise KeyError("EXIF data for %s doesn't have key %s" % (self._filename, index))
-            elif len(found) > 1:
-                raise Exception(
+            if len(found) > 1:
+                raise AmbiguousKeyError(
                     "Key %s is not unique in EXIF data for %s" % (index, self._filename)
                 )
-            else:
-                return found[0]
-        else:
-            assert (
-                isinstance(index, tuple) and len(index) == 2
-            ), "Index must be a string or a tuple of 2 strings"
-            return self._namespaces[index[0]][index[1]]
+            return found[0]
+        assert (
+            isinstance(index, tuple) and len(index) == 2
+        ), "Index must be a string or a tuple of 2 strings"
+        return self._namespaces[index[0]][index[1]]
 
     def get_filename(self):
         return self._filename
@@ -163,27 +146,22 @@ class ExifFile:
                 if alt is not None:
                     exiftoolArgs += ["-GPSAltitude=%f" % alt, "-GPSAltitudeRef=%d" % altRef]
 
-            pipe = Popen(
+            p = subprocess.run(
                 [self._exiftool] + _exiftoolCharsetArgs + exiftoolArgs + ["--", self._filename],
-                stdin=PIPE,
-                stdout=PIPE,
+                stdin=DEVNULL,
+                stdout=DEVNULL,
+                check=False,
                 **_popenKwds,
             )
-            pipe.communicate()
-            if pipe.returncode != 0:
+            if p.returncode != 0:
                 raise ExiftoolException()
             self._modified = False
 
     def has_embedded_image(self):
-        try:
-            self["PreviewImage"]
-            return True
-        except KeyError:
-            try:
-                self["JpgFromRaw"]
-                return True
-            except KeyError:
-                return False
+        return any(
+            "PreviewImage" in namespace or "JpgFromRaw" in namespace
+            for namespace in self._namespaces.values()
+        )
 
 
 def read_orientation(filename, exiftool="exiftool"):
@@ -195,6 +173,7 @@ def read_orientation(filename, exiftool="exiftool"):
         stdin=PIPE,
         capture_output=True,
         text=True,
+        check=False,
         **_popenKwds,
     )
     if p.returncode != 0:
@@ -223,6 +202,7 @@ def set_orientation(filename, orientation, exiftool="exiftool"):
         stdin=PIPE,
         capture_output=True,
         text=True,
+        check=False,
         **_popenKwds,
     )
     if p.returncode != 0:
@@ -237,10 +217,7 @@ class _ExifContext:
         self._exiftool = exiftool
 
     def gen_exif_files(self, pipe):
-        for exiffiles in self._gen_exiffile_objects(
-            self._gen_file_descriptions(pipe), self._exiftool
-        ):
-            yield exiffiles
+        yield from self._gen_exiffile_objects(self._gen_file_descriptions(pipe), self._exiftool)
 
     def _reverse_namespace(self, tag):
         if tag.startswith("{"):
@@ -248,11 +225,8 @@ class _ExifContext:
             for shortForm, longForm in self._namespaces:
                 if uri == longForm:
                     return shortForm, shortTag
-            else:
-                print("*** Could not match namespace", uri)
-                return "", tag
-        else:
-            return "", tag
+            print("*** Could not match namespace", uri)
+        return "", tag
 
     def _gen_file_descriptions(self, pipe):
         for event, item in ET.iterparse(
@@ -308,32 +282,25 @@ def gen_images_from_files(
     defaultTz = datetime.timezone(
         datetime.timedelta(hours=defaultTzHours, minutes=defaultTzMinutes)
     )
-    if include is not None:
-        include = [e.lower() for e in include]
-    if exclude is not None:
-        exclude = [e.lower() for e in exclude]
-    files = _find_all_files(files, include, exclude)
+    if _DEBUG:
+        print(files)
+    files = find_all_files(files, include, exclude)
     if len(files) == 0:
         return
     # The tags and file names are passed to exiftool as an argument file on stdin,
     # one argument per line
     argFile = "\n".join(_tagsToExtract + [str(f) for f in files]) + "\n"
-    pipe = Popen(
+    with Popen(
         [exiftool] + _exiftoolCharsetArgs + ["-q", "-n", "-X", "-@", "-"],
         stdin=PIPE,
         stdout=PIPE,
         **_popenKwds,
-    )
-    pipe.stdin.write(argFile.encode("utf-8", "surrogateescape"))
-    pipe.stdin.close()
+    ) as pipe:
+        pipe.stdin.write(argFile.encode("utf-8", "surrogateescape"))
+        pipe.stdin.close()
 
-    context = _ExifContext(defaultTz, exiftool)
-    try:
-        for v in context.gen_exif_files(pipe):
-            yield v
-    finally:
-        pipe.stdout.close()
-        pipe.wait()
+        context = _ExifContext(defaultTz, exiftool)
+        yield from context.gen_exif_files(pipe)
 
 
 if __name__ == "__main__":

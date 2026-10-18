@@ -1,0 +1,38 @@
+[MAIN]
+# wx is a compiled extension, so pylint needs to import it to see its members
+extension-pkg-allow-list=wx
+
+# The modules in sub-modules/ are not a package; pgtips.py puts the directory on sys.path
+init-hook='import sys; sys.path.append("sub-modules")'
+
+[FORMAT]
+# Matches black -l 99
+max-line-length=99
+
+[MESSAGES CONTROL]
+disable=
+    # The code uses camelCase names and wx-style method names (e.g. OnPaint) throughout
+    invalid-name,
+    # Docstrings are written where they add something, not on every module, class and function
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    # The code uses %-formatting throughout
+    consider-using-f-string,
+    # Tests and closely related classes (e.g. Region and Point) access each other's internals
+    protected-access,
+    # Design limits that don't suit wx classes and their event handlers
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-instance-attributes,
+    too-many-locals,
+    too-many-branches,
+    # TODO comments are tracked in the code
+    fixme,
+    # Subclasses of wx classes inherit from deep hierarchies
+    too-many-ancestors,
+
+[VARIABLES]
+# wx event handlers must accept the event, even when they don't use it
+ignored-argument-names=_.*|^ignored_|^unused_|^evt$|^event$

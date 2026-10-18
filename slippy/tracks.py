@@ -1,21 +1,19 @@
-from math import *
-from .regions import *
-from .utils import *
+from .regions import Point, Region
+from .utils import _get_coordinate
 
 
-class Track(object):
+class Track:
     def __init__(self, points):
         self._points = [Point(x[0], x[1]) for x in points]
         self._cache = {}
+        self._region = None
 
     def get_region(self):
-        try:
-            return self._region
-        except AttributeError:
+        if self._region is None:
             self._region = Region()
             for p in self._points:
                 self._region += p
-            return self._region
+        return self._region
 
     def get_track(self, zoom):
         try:
@@ -30,5 +28,5 @@ class Track(object):
                         yield n
                     last = n
 
-            self._cache[zoom] = [x for x in gen_coords(self._points)]
+            self._cache[zoom] = list(gen_coords(self._points))
             return self._cache[zoom]

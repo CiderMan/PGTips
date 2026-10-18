@@ -1,4 +1,11 @@
-import os, sys
+import functools
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+import wx
 
 # GUI tests need a display to create a wx.App; without one, wxGTK aborts the whole process
 HAVE_DISPLAY = sys.platform != "linux" or bool(
@@ -6,17 +13,19 @@ HAVE_DISPLAY = sys.platform != "linux" or bool(
 )
 
 
-_app = None
-
-
+@functools.cache
 def get_wx_app():
     """
     Return the wx.App for the test run, creating it if necessary (wx only supports one per
-    process). A reference is kept so that it isn't destroyed between tests
+    process). The cache keeps a reference so that it isn't destroyed between tests
     """
-    global _app
-    import wx
+    return wx.App(False)
 
-    if _app is None:
-        _app = wx.App(False)
-    return _app
+
+def temp_dir(testCase):
+    """
+    Return a new temporary directory that is removed when the test case finishes
+    """
+    path = Path(tempfile.mkdtemp())
+    testCase.addCleanup(shutil.rmtree, path)
+    return path

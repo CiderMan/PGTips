@@ -1,8 +1,7 @@
 import datetime
-import tempfile
 import unittest
-from pathlib import Path
 
+from test import temp_dir
 import gpsfiles
 from gpsfiles import _parse_xsd_datetime, gen_tracks_from_files
 
@@ -68,11 +67,7 @@ class ParseXsdDatetimeTest(unittest.TestCase):
 class GpsFilesTestCase(unittest.TestCase):
     def setUp(self):
         gpsfiles._DEBUG = False
-        self._tmp = tempfile.TemporaryDirectory()
-        self.dir = Path(self._tmp.name)
-
-    def tearDown(self):
-        self._tmp.cleanup()
+        self.dir = temp_dir(self)
 
     def write(self, name, content):
         path = self.dir / name
@@ -84,7 +79,7 @@ class GpxTest(GpsFilesTestCase):
     def setUp(self):
         super().setUp()
         self.path = self.write("track.gpx", _GPX)
-        (self.gpx,) = gen_tracks_from_files(self.path)
+        (self.gpx,) = list(gen_tracks_from_files(self.path))
 
     def test_segments_become_tracks(self):
         self.assertEqual(len(self.gpx), 2)
@@ -110,11 +105,13 @@ class GpxTest(GpsFilesTestCase):
     def test_match_later_segment_of_track(self):
         lat, lon, alt = self.gpx.match_time(datetime.datetime(2010, 9, 2, 10, 1, 30, tzinfo=UTC))
         self.assertAlmostEqual(lat, 50.15)
+        self.assertAlmostEqual(lon, -4.15)
         self.assertAlmostEqual(alt, 25)
 
     def test_match_without_altitude(self):
         lat, lon, alt = self.gpx.match_time(datetime.datetime(2010, 9, 2, 12, 5, tzinfo=UTC))
         self.assertAlmostEqual(lat, 51.05)
+        self.assertAlmostEqual(lon, -3.05)
         self.assertIsNone(alt)
 
     def test_match_within_end_tolerance(self):
@@ -132,7 +129,7 @@ class GpxTest(GpsFilesTestCase):
 
 class TcxTest(GpsFilesTestCase):
     def test_parse(self):
-        (tcx,) = gen_tracks_from_files(self.write("run.tcx", _TCX))
+        (tcx,) = list(gen_tracks_from_files(self.write("run.tcx", _TCX)))
         self.assertEqual(len(tcx), 1)
         self.assertEqual(tcx[0][0][1:], (50.0, -4.0, 100.0))
         self.assertEqual(tcx[0][1][3], 101.0)
@@ -143,7 +140,7 @@ class TrackProcessingTest(GpsFilesTestCase):
         gpx = _GPX.replace("2010-09-02T12:00:00Z", "2010-09-02T10:02:05Z").replace(
             "2010-09-02T12:10:00Z", "2010-09-02T10:03:00Z"
         )
-        (tracks,) = gen_tracks_from_files(self.write("track.gpx", gpx))
+        (tracks,) = list(gen_tracks_from_files(self.write("track.gpx", gpx)))
         self.assertEqual(len(tracks), 1)
         self.assertEqual(len(tracks[0]), 5)
 
@@ -151,7 +148,7 @@ class TrackProcessingTest(GpsFilesTestCase):
         gpx = _GPX.replace(
             '<trkpt lat="51.1" lon="-3.1"><time>2010-09-02T12:10:00Z</time></trkpt>', ""
         )
-        (tracks,) = gen_tracks_from_files(self.write("track.gpx", gpx))
+        (tracks,) = list(gen_tracks_from_files(self.write("track.gpx", gpx)))
         self.assertEqual(len(tracks), 1)
 
     def test_split_tracks(self):

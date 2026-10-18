@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-import wx, sys, shutil
+import queue
+import shutil
+import subprocess
+import sys
+from functools import reduce
 from pathlib import Path
+from subprocess import DEVNULL
+from threading import Thread
+
+import wx
+from wx.lib.agw import aui
 
 # Include the sub-directory containing the sub-modules when looking for imports
 sys.path.append(str(Path(__file__).resolve().parent / "sub-modules"))
 
-import wx.lib.agw.aui as aui
-import wx.lib.mixins.listctrl as listmix
-import datetime
-from functools import reduce
-import images
-from threading import Thread
-import queue
-from subprocess import Popen, PIPE, STDOUT
-import slippy
+# pylint: disable=wrong-import-position
 from gpsfiles import gen_tracks_from_files
 from imagefiles import gen_images_from_files, read_orientation, set_orientation
-from options import OptionsDialog
 from imagelist import ImageListCtrlPanel
+from options import OptionsDialog
+import slippy
+
+# pylint: enable=wrong-import-position
 
 _DEFAULT_STATUS_TEXT = "PGTips v0.1"
 
@@ -43,25 +47,24 @@ def _lossless_rotate(jpegFile, orientation, jpegtran="jpegtran", exiftool="exift
     """
     tmpFile = jpegFile.with_name(jpegFile.name + ".pgtips~.jpg")
     try:
-        p = Popen(
+        p = subprocess.run(
             [jpegtran, "-copy", "all"]
             + _jpegtranOptions[orientation]
             + ["-outfile", tmpFile, jpegFile],
-            stdin=PIPE,
-            stdout=PIPE,
-            stderr=PIPE,
+            stdin=DEVNULL,
+            capture_output=True,
             text=True,
+            check=False,
         )
-        stdout, stderr = p.communicate()
         if p.returncode != 0:
-            raise RuntimeError("jpegtran failed: " + stderr)
+            raise RuntimeError("jpegtran failed: " + p.stderr)
         set_orientation(tmpFile, 1, exiftool)
         tmpFile.replace(jpegFile)
     finally:
         tmpFile.unlink(missing_ok=True)
 
 
-class GpsFileCache(object):
+class GpsFileCache:
     """
     This class implements a wrapper of the objects returned by the gpsfiles module
     It holds the inner object in its gpsFile member and the slippy track for each
@@ -127,13 +130,13 @@ class MyFrame(wx.Frame):
     def __init__(
         self,
         parent,
-        id=-1,
+        winId=-1,
         title=_DEFAULT_STATUS_TEXT,
         pos=wx.DefaultPosition,
         size=(800, 500),
         style=wx.DEFAULT_FRAME_STYLE,
     ):
-        wx.Frame.__init__(self, parent, id, title, pos, size, style)
+        wx.Frame.__init__(self, parent, winId, title, pos, size, style)
 
         self._statusBar = CustomStatusBar(self)
 
@@ -199,8 +202,8 @@ class MyFrame(wx.Frame):
             return menu
 
         mb = wx.MenuBar()
-        for title, menu in menuDef:
-            mb.Append(create_menu(menu), title)
+        for menuTitle, menu in menuDef:
+            mb.Append(create_menu(menu), menuTitle)
 
         self.SetMenuBar(mb)
 
@@ -309,12 +312,13 @@ class MyFrame(wx.Frame):
         if self._exiftoolChecked != exiftool:
             error = False
             try:
-                p = Popen([exiftool, "-ver"], stdin=PIPE, stdout=PIPE, stderr=STDOUT)
-                stdout, stderr = p.communicate()
+                subprocess.run(
+                    [exiftool, "-ver"], stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, check=False
+                )
             except OSError:
                 error = True
             if error:
-                response = wx.MessageDialog(
+                wx.MessageDialog(
                     self,
                     "PGTips is uses EXIFtool to read the metadata in your photographs\n"
                     "and set the geotags in them. However, it has not been possible\n"
@@ -438,7 +442,8 @@ class MyFrame(wx.Frame):
         srcFile = dirpath / f
         destFile = workingDir / f
         if destFile.exists():
-            # User must have OK'd this so delete the destination file then copy the new one into place
+            # User must have OK'd this so delete the destination file then copy the new one
+            # into place
             destFile.unlink()
         shutil.copy(srcFile, workingDir)
         if process and ext in [".jpg", ".jpeg"] and useJpegtran:
@@ -453,14 +458,9 @@ class MyFrame(wx.Frame):
                 _lossless_rotate(destFile, orient, jpegtran, self._exiftoolChecked)
 
         if process:
-            # Now that the file is where it needs to be, load the file
-            # TODO: Could optimize by batching files together?
-            if 1:
-                self._importQueue.put(destFile)
-            else:
-                wx.CallAfter(self._statusBar.SetStatusText, "Loading " + f)
-                for i in gen_images_from_files(destFile, exiftool=self._exiftoolChecked):
-                    wx.CallAfter(self._add_image, i)
+            # Now that the file is where it needs to be, queue it to be loaded. The import
+            # thread batches the queued files together when passing them to exiftool
+            self._importQueue.put(destFile)
 
     def _copy_file_overwrite_check(
         self, f, dirpath, workingDir, ext, process, useJpegtran, jpegtran
@@ -498,7 +498,7 @@ class MyFrame(wx.Frame):
         wx.CallAfter(self._statusBar.SetStatusText, "Searching for files to import...")
 
         # Walk and copy files to working dir
-        for dirpath, dirnames, filenames in fromDir.walk():
+        for dirpath, _dirnames, filenames in fromDir.walk():
             for f in filenames:
                 ext = Path(f).suffix.lower()
                 copy = False
@@ -544,8 +544,9 @@ class MyFrame(wx.Frame):
             if path != "":
                 jpegtran = str(Path(path, jpegtran))
             try:
-                p = Popen([jpegtran, "-v"], stdin=PIPE, stdout=PIPE, stderr=STDOUT)
-                stdout, stderr = p.communicate()
+                subprocess.run(
+                    [jpegtran, "-v"], stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL, check=False
+                )
             except OSError:
                 error = True
             if error:
@@ -560,8 +561,7 @@ class MyFrame(wx.Frame):
                 ).ShowModal()
                 if response == wx.ID_NO:
                     return
-                else:
-                    useJpegtran = False
+                useJpegtran = False
 
         dlg = wx.DirDialog(self, style=wx.DD_DIR_MUST_EXIST, defaultPath="/home/steve/Master/")
         if dlg.ShowModal() == wx.ID_OK:
@@ -662,7 +662,7 @@ class MyFrame(wx.Frame):
         loadedImages = list(self._images.iter_images())
 
         # Walk and copy files to working dir
-        for dirpath, dirnames, filenames in fromDir.walk():
+        for dirpath, _dirnames, filenames in fromDir.walk():
             for f in filenames:
                 self._do_work(self._export_file_work, dirpath, f, loadedImages)
 
@@ -695,7 +695,7 @@ class MyFrame(wx.Frame):
         gpsFiles = []
         item, cookie = self._gpxTree.GetFirstChild(self._gpxRoot)
         while item.IsOk():
-            tracks, n = self._gpxTree.GetItemData(item)
+            tracks, _n = self._gpxTree.GetItemData(item)
             gpsFiles.append(tracks.gpsFile)
             item, cookie = self._gpxTree.GetNextChild(self._gpxRoot, cookie)
         for img in self._images.iter_images():

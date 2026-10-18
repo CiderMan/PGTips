@@ -1,8 +1,10 @@
 import unittest
-
 from test import HAVE_DISPLAY, get_wx_app
+
+import wx
+
 from slippy.regions import Point, Region
-from slippy.slip import get_lat_long, get_tile_number
+from slippy.slip import SlippyPanel, get_lat_long, get_tile_number
 from slippy.tracks import Track
 
 
@@ -39,15 +41,11 @@ class _RecordingCache:
 
     def GetTileFilename(self, xtile, ytile, zoom):
         self.requests.append((xtile, ytile, zoom))
-        return None
 
 
 @unittest.skipUnless(HAVE_DISPLAY, "Needs a display")
 class SlippyPanelTest(unittest.TestCase):
     def setUp(self):
-        import wx
-        from slippy.slip import SlippyPanel
-
         get_wx_app()
         self.frame = wx.Frame(None)
         self.cache = _RecordingCache()

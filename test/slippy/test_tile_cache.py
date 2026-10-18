@@ -1,7 +1,6 @@
-import tempfile
 import unittest
-from pathlib import Path
 
+from test import temp_dir
 from slippy.tile_cache import SlippyCache
 
 
@@ -14,19 +13,17 @@ class _OfflineSource:
     def get_full_name(self):
         return str(self._root)
 
-    def get_tile_url(self, xtile, ytile, zoom):
+    def get_tile_url(self, _xtile, _ytile, _zoom):
         return ""
 
 
 class SlippyCacheTest(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
+        self.root = temp_dir(self)
         self.cache = SlippyCache(_OfflineSource(self.root))
 
     def tearDown(self):
         self.cache._fetchQueue.join()
-        self._tmp.cleanup()
 
     def test_filename(self):
         fname = self.cache.GetTileFilename(3, 5, 4)

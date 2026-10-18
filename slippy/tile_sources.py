@@ -14,8 +14,7 @@ class TileSource:
     def get_tile_url(self, xtile, ytile, zoom):
         if zoom < self._zoomRange[0] or zoom > self._zoomRange[1]:
             return ""
-        else:
-            return "/".join([self._prefix, str(zoom), str(xtile), str(ytile) + ".png"])
+        return "/".join([self._prefix, str(zoom), str(xtile), str(ytile) + ".png"])
 
     def get_full_name(self):
         return self._name

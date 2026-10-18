@@ -1,7 +1,10 @@
 import datetime
 import unittest
-
 from test import HAVE_DISPLAY, get_wx_app
+
+import wx
+
+from imagelist import ImageListCtrlPanel
 
 
 class _Image:
@@ -19,9 +22,6 @@ class _Image:
 @unittest.skipUnless(HAVE_DISPLAY, "Needs a display")
 class ImageListCtrlPanelTest(unittest.TestCase):
     def setUp(self):
-        import wx
-        from imagelist import ImageListCtrlPanel
-
         get_wx_app()
         self.frame = wx.Frame(None)
         self.panel = ImageListCtrlPanel(self.frame)
@@ -70,8 +70,6 @@ class ImageListCtrlPanelTest(unittest.TestCase):
         self.assertEqual([self.row(i)[0] for i in range(2)], ["b.jpg", "a.jpg"])
 
     def test_selection_notifies(self):
-        import wx
-
         a = _Image("a.jpg", None)
         self.panel.add_image(a)
         selected = []

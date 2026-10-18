@@ -4,17 +4,19 @@ import datetime
 import json
 import shutil
 import subprocess
-import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from test import HAVE_DISPLAY, get_wx_app
+from test import HAVE_DISPLAY, get_wx_app, temp_dir
+
+import wx
+
 import pgtips
 
 # Importing pgtips puts the sub-modules on the path
-from imagefiles import read_orientation, set_orientation
+from imagefiles import read_orientation  # pylint: disable=wrong-import-order
 
 HAVE_TOOLS = bool(shutil.which("exiftool") and shutil.which("jpegtran"))
 
@@ -68,8 +70,6 @@ def _dimensions(path):
 
 def _colour(path, x, y):
     """Return the dominant colour component ("red" or "blue") of a pixel"""
-    import wx
-
     get_wx_app()
     img = wx.Image(str(path), wx.BITMAP_TYPE_JPEG)
     return "red" if img.GetRed(x, y) > img.GetBlue(x, y) else "blue"
@@ -78,11 +78,7 @@ def _colour(path, x, y):
 @unittest.skipUnless(HAVE_TOOLS, "Needs exiftool and jpegtran")
 class LosslessRotateTest(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.dir = Path(self._tmp.name)
-
-    def tearDown(self):
-        self._tmp.cleanup()
+        self.dir = temp_dir(self)
 
     def assertNoTempFiles(self):
         self.assertEqual([f.name for f in self.dir.iterdir()], ["photo.jpg"])
@@ -115,7 +111,10 @@ class LosslessRotateTest(unittest.TestCase):
         photo = _write_photo(self.dir / "photo.jpg", 8)
         pgtips._lossless_rotate(photo, 8)
         out = subprocess.run(
-            ["exiftool", "-s3", "-DateTimeOriginal", str(photo)], capture_output=True, text=True
+            ["exiftool", "-s3", "-DateTimeOriginal", str(photo)],
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
         self.assertEqual(out, "2010:09:02 10:00:30")
 
@@ -134,7 +133,7 @@ class _OfflineTileSource:
     def get_full_name(self):
         return "tiles"
 
-    def get_tile_url(self, xtile, ytile, zoom):
+    def get_tile_url(self, _xtile, _ytile, _zoom):
         return ""
 
     def get_attribution(self):
@@ -146,9 +145,7 @@ class _OfflineTileSource:
 class MyFrameTest(unittest.TestCase):
     def setUp(self):
         get_wx_app()
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        root = Path(self._tmp.name)
+        root = temp_dir(self)
         # The options file and tile cache are relative to the current directory
         self.enterContext(contextlib.chdir(root))
         self.enterContext(
@@ -167,7 +164,8 @@ class MyFrameTest(unittest.TestCase):
                     "ImageExtensions": [".jpg"],
                     "OtherExtensions": [".mov"],
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         self.frame = pgtips.MyFrame(None)
         self.addCleanup(self.frame.OnClose, None)
@@ -175,8 +173,6 @@ class MyFrameTest(unittest.TestCase):
 
     def pump(self, condition, timeout=20):
         """Run the event loop until the condition is true and the worker threads are idle"""
-        import wx
-
         end = time.monotonic() + timeout
         while time.monotonic() < end:
             wx.Yield()
@@ -240,7 +236,7 @@ class MyFrameTest(unittest.TestCase):
         self.frame._do_work(self.frame._load_gps_files_work, gpx)
         tree = self.frame._gpxTree
         self.pump(lambda: tree.GetChildrenCount(self.frame._gpxRoot, False) == 1)
-        item, cookie = tree.GetFirstChild(self.frame._gpxRoot)
+        item, _cookie = tree.GetFirstChild(self.frame._gpxRoot)
         self.assertEqual(tree.GetItemText(item), "track.gpx")
         tree.SelectItem(item)
         self.pump(lambda: len(self.frame._tracks) == 1)
@@ -272,6 +268,7 @@ class MyFrameTest(unittest.TestCase):
             ["exiftool", "-n", "-s3", "-GPSLatitude", "-GPSLongitude", str(exported)],
             capture_output=True,
             text=True,
+            check=True,
         ).stdout.split()
         self.assertEqual([round(float(v), 4) for v in out], [50.05, -4.05])
 

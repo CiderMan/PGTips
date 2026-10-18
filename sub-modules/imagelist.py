@@ -167,8 +167,7 @@ class ImageListCtrlPanel(wx.Panel, listmix.ColumnSorterMixin):
         """
         Iterate over (a snapshot of) the images
         """
-        for img in list(self._itemDataMap.values()):
-            yield img
+        yield from list(self._itemDataMap.values())
 
     def _get_image_from_index(self, index):
         """

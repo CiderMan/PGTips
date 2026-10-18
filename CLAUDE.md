@@ -17,7 +17,7 @@ and files photos. Shells out to `exiftool`, and optionally `jpegtran`.
   tested.
 - `slippy/` - the slippy-map panel package (tiles, cache, markers, tracks, regions).
 - `sub-modules/` - plain modules put on `sys.path` by `pgtips.py` (GPS file parsing,
-  exiftool wrapper, image list, options dialog, embedded images).
+  exiftool wrapper, file finding, image list, options dialog, embedded images).
 
 ## Tests
 
@@ -30,3 +30,11 @@ and files photos. Shells out to `exiftool`, and optionally `jpegtran`.
 ## Formatting
 
 - Format Python code with `black -l 99`.
+
+## Linting
+
+- Lint with `pylint pgtips.py slippy sub-modules test`, run from the repo root (`.pylintrc` adds
+  `sub-modules/` to the path relative to the current directory). Keep it at 10/10.
+- `.pylintrc` turns off checks that don't fit the codebase's conventions (camelCase and wx-style
+  names, docstrings everywhere, `%`-formatting, etc.). Fix other messages rather than
+  disabling them; if a disable is really needed, make it inline with a comment saying why.

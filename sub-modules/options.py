@@ -1,13 +1,32 @@
-import wx
-from subprocess import Popen, PIPE, STDOUT
-import ast, json
+import ast
+import json
+import subprocess
 from pathlib import Path
+from subprocess import DEVNULL, PIPE, STDOUT
+
+import wx
 
 _TEXT_WIDTH = 500
-_FILETYPES_TEXT = "PGTips handles individual files as being one of three types. Specify the file extensions that you want to be handled in that way.\n\nNote that specifying no filetypes in a box means that PGTips should attempt to handle all files that it encounters in that way."
+_FILETYPES_TEXT = (
+    "PGTips handles individual files as being one of three types. Specify the file extensions "
+    "that you want to be handled in that way.\n\nNote that specifying no filetypes in a box means "
+    "that PGTips should attempt to handle all files that it encounters in that way."
+)
 _DIRECTORIES_TEXT = "Specify the directories to be used by PGTips."
-_EXIFTOOL_TEXT = "EXIFtool is the de-facto standard tool for reading and writing EXIF data in images. At the time of writing, it supports the largest number of file formats (including most camera RAW formats) and provides the most complete support of tag types. It also supports two different structured interfaces (JSON and XML) to allow easy interfacing to other applications as well as its human interface. Hence, PGTips uses it to read information like the shooting date from your images and write back the geotagging infomation."
-_JPEGTRAN_TEXT = "jpegtran is an application that supports lossless operations on JPEG images. In particular, it allows JPEGs to be losslessly rotated.\n\nWhile PGTips doesn't require jpegtran, if it is available, it can be used to losslessly rotate (either manually or automatically, using the orientation recorded in the EXIF data) JPEGs if required."
+_EXIFTOOL_TEXT = (
+    "EXIFtool is the de-facto standard tool for reading and writing EXIF data in images. At the "
+    "time of writing, it supports the largest number of file formats (including most camera RAW "
+    "formats) and provides the most complete support of tag types. It also supports two different "
+    "structured interfaces (JSON and XML) to allow easy interfacing to other applications as well "
+    "as its human interface. Hence, PGTips uses it to read information like the shooting date "
+    "from your images and write back the geotagging infomation."
+)
+_JPEGTRAN_TEXT = (
+    "jpegtran is an application that supports lossless operations on JPEG images. In particular, "
+    "it allows JPEGs to be losslessly rotated.\n\nWhile PGTips doesn't require jpegtran, if it is "
+    "available, it can be used to losslessly rotate (either manually or automatically, using the "
+    "orientation recorded in the EXIF data) JPEGs if required."
+)
 
 
 def _split_csl(csl, prefix=""):
@@ -21,6 +40,9 @@ def _split_csl(csl, prefix=""):
 
 
 class OptionsDialog(wx.Dialog):
+    # The controls are created by the _create_*_page methods, which are called from __init__
+    # pylint: disable=attribute-defined-outside-init
+
     def _create_labelled_text_ctrl(
         self,
         parent,
@@ -63,7 +85,9 @@ class OptionsDialog(wx.Dialog):
             "Image file extensions:",
             vSizer,
             "_imageExtTextCtrl",
-            tooltip="Image files are the files that PGTips will import, attempt to Geotag and file",
+            tooltip=(
+                "Image files are the files that PGTips will import, attempt to Geotag and file"
+            ),
             multiline=True,
         )
         self._create_labelled_text_ctrl(
@@ -72,7 +96,10 @@ class OptionsDialog(wx.Dialog):
             vSizer,
             "_gpsExtTextCtrl",
             border=10,
-            tooltip="GPS files are the files that PGTips will use to determine where you were when a photo was taken and are used 'in place'",
+            tooltip=(
+                "GPS files are the files that PGTips will use to determine where you were when a "
+                "photo was taken and are used 'in place'"
+            ),
             multiline=True,
         )
         self._create_labelled_text_ctrl(
@@ -81,7 +108,10 @@ class OptionsDialog(wx.Dialog):
             vSizer,
             "_otherExtTextCtrl",
             border=10,
-            tooltip="'Other' files are additional file types (e.g. Video files) that will be imported and filed but otherwise will not be processed",
+            tooltip=(
+                "'Other' files are additional file types (e.g. Video files) that will be imported "
+                "and filed but otherwise will not be processed"
+            ),
             multiline=True,
         )
         self.filetypesPage.SetSizer(vSizer)
@@ -118,7 +148,10 @@ class OptionsDialog(wx.Dialog):
             "Working directory:",
             vSizer,
             "_workingDir",
-            tooltip="This is the directory into which PGTips will import files before working on (i.e. modifying) those files",
+            tooltip=(
+                "This is the directory into which PGTips will import files before working on "
+                "(i.e. modifying) those files"
+            ),
         )
         self._create_labelled_text_ctrl(
             self.directoriesPage,
@@ -126,7 +159,10 @@ class OptionsDialog(wx.Dialog):
             vSizer,
             "_filingDir",
             border=10,
-            tooltip="This is the base directory into which PGTips will move the files once it has finished working on those files",
+            tooltip=(
+                "This is the base directory into which PGTips will move the files once it has "
+                "finished working on those files"
+            ),
         )
         self._create_labelled_text_ctrl(
             self.directoriesPage,
@@ -134,7 +170,9 @@ class OptionsDialog(wx.Dialog):
             vSizer,
             "_filingStruct",
             border=10,
-            tooltip="This is the directory structure to create underneath the filing directory above",
+            tooltip=(
+                "This is the directory structure to create underneath the filing directory above"
+            ),
         )
         self.directoriesPage.SetSizer(vSizer)
         return self.directoriesPage
@@ -148,7 +186,6 @@ class OptionsDialog(wx.Dialog):
         self.options["WorkingDir"] = str(Path(self._workingDir.GetValue()))
         self.options["FilingDir"] = str(Path(self._filingDir.GetValue()))
         self.options["FilingStruct"] = str(Path(self._filingStruct.GetValue()))
-        pass
 
     def _create_exiftool_page(self):
         self.exiftoolPage = wx.Panel(self.categoryNotebook, -1)
@@ -170,7 +207,11 @@ class OptionsDialog(wx.Dialog):
             "Path to EXIFtool:",
             vSizer,
             "_exiftoolPath",
-            tooltip="If EXIFtool is in your path, simply leave this blank. Once you've completed the configuration, click 'Check Configuration' to see if PGTips is able to find the application",
+            tooltip=(
+                "If EXIFtool is in your path, simply leave this blank. Once you've completed the "
+                "configuration, click 'Check Configuration' to see if PGTips is able to find the "
+                "application"
+            ),
             border=6,
         )
         vSizer.Add(self._exiftoolCheckCfg, 0, wx.TOP | wx.ALIGN_LEFT, 3)
@@ -193,10 +234,14 @@ class OptionsDialog(wx.Dialog):
         if path != "":
             exiftool = str(Path(path, exiftool))
         try:
-            p = Popen(
-                [exiftool, "-ver", "-listwf"], stdin=PIPE, stdout=PIPE, stderr=STDOUT, text=True
-            )
-            stdout, stderr = p.communicate()
+            stdout = subprocess.run(
+                [exiftool, "-ver", "-listwf"],
+                stdin=DEVNULL,
+                stdout=PIPE,
+                stderr=STDOUT,
+                text=True,
+                check=False,
+            ).stdout
         except OSError:
             self._exiftoolCheckText.SetValue(
                 "ERROR: Unable to execute '%s -ver -listwf'" % exiftool
@@ -233,7 +278,11 @@ class OptionsDialog(wx.Dialog):
             "Path to jpegtran:",
             vSizer,
             "_jpegtranPath",
-            tooltip="If jpegtran is in your path, simply leave this blank. Once you've completed the configuration, click 'Check Configuration' to see if PGTips is able to find the application",
+            tooltip=(
+                "If jpegtran is in your path, simply leave this blank. Once you've completed the "
+                "configuration, click 'Check Configuration' to see if PGTips is able to find the "
+                "application"
+            ),
         )
         vSizer.Add(self._jpegtranCheckCfg, 0, wx.TOP | wx.ALIGN_LEFT, 3)
         vSizer.Add(self._jpegtranCheckText, 1, wx.EXPAND | wx.TOP, 3)
@@ -264,8 +313,9 @@ class OptionsDialog(wx.Dialog):
         if path != "":
             jpegtran = str(Path(path, jpegtran))
         try:
-            p = Popen([jpegtran, "-v"], stdin=PIPE, stdout=PIPE, stderr=STDOUT, text=True)
-            stdout, stderr = p.communicate()
+            stdout = subprocess.run(
+                [jpegtran, "-v"], stdin=DEVNULL, stdout=PIPE, stderr=STDOUT, text=True, check=False
+            ).stdout
         except OSError:
             self._jpegtranCheckText.SetValue("ERROR: Unable to execute '%s -v'" % jpegtran)
             return
@@ -280,7 +330,7 @@ class OptionsDialog(wx.Dialog):
             self._optFile = kwds["optFile"]
             del kwds["optFile"]
             try:
-                o = Path(self._optFile).read_text()
+                o = Path(self._optFile).read_text(encoding="utf-8")
             except OSError:
                 o = "{}"
             try:
@@ -350,12 +400,13 @@ class OptionsDialog(wx.Dialog):
             ),
         ]
 
-        for name, addFn, popFn, updateFn in self._pages:
+        for name, addFn, popFn, _updateFn in self._pages:
             panel = addFn()
             self.categoryNotebook.AddPage(panel, name)
             popFn()
 
-        # Create the main sizer that has the notebook at the top and the OK/Cancel at the bottom
+        # Create the main sizer that has the notebook at the top and the OK/Cancel at the
+        # bottom
         mainSizer = wx.BoxSizer(wx.VERTICAL)
 
         # Add the notebook
@@ -384,16 +435,16 @@ class OptionsDialog(wx.Dialog):
         self.Layout()
 
     def OnOK(self, evt):
-        for name, addFn, popFn, updateFn in self._pages:
+        for _name, _addFn, _popFn, updateFn in self._pages:
             updateFn()
-        for name, addFn, popFn, updateFn in self._pages:
+        for _name, _addFn, popFn, _updateFn in self._pages:
             popFn()
         if self._optFile is not None:
-            Path(self._optFile).write_text(json.dumps(self.options, indent=4))
+            Path(self._optFile).write_text(json.dumps(self.options, indent=4), encoding="utf-8")
         evt.Skip()
 
     def OnCancel(self, evt):
-        for name, addFn, popFn, updateFn in self._pages:
+        for _name, _addFn, popFn, _updateFn in self._pages:
             popFn()
         evt.Skip()
 

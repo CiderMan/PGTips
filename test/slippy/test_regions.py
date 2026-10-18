@@ -67,7 +67,7 @@ class RegionTest(unittest.TestCase):
 
     def test_add_unknown_type(self):
         with self.assertRaises(TypeError):
-            Region(Point(50, -4)) + 1
+            _ = Region(Point(50, -4)) + 1
 
 
 if __name__ == "__main__":

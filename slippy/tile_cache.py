@@ -50,7 +50,7 @@ class SlippyCache:
     def StartNewFetchBatch(self):
         try:
             while True:
-                item = self._fetchQueue.get(False)
+                self._fetchQueue.get(False)
                 self._fetchQueue.task_done()
         except Empty:
             pass
@@ -62,12 +62,11 @@ class SlippyCache:
         if xtile < 0 or ytile < 0 or ytile >= numTiles:
             # Indicate that this is not a valid tile
             return None
-        else:
-            fname = Path(self.source.get_full_name(), str(zoom), str(xtile), str(ytile) + ".png")
-            if not fname.is_file():
-                url = self.source.get_tile_url(xtile, ytile, zoom)
-                # Ensure that the directory exists
-                fname.parent.mkdir(parents=True, exist_ok=True)
-                self._fetchQueue.put((url, fname))
-            # Valid tile, though may not be present in the cache
-            return fname
+        fname = Path(self.source.get_full_name(), str(zoom), str(xtile), str(ytile) + ".png")
+        if not fname.is_file():
+            url = self.source.get_tile_url(xtile, ytile, zoom)
+            # Ensure that the directory exists
+            fname.parent.mkdir(parents=True, exist_ok=True)
+            self._fetchQueue.put((url, fname))
+        # Valid tile, though may not be present in the cache
+        return fname

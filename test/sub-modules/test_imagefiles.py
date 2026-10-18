@@ -2,12 +2,13 @@ import base64
 import datetime
 import shutil
 import subprocess
-import tempfile
 import unittest
 from pathlib import Path
 
+from test import temp_dir
 import imagefiles
 from imagefiles import (
+    AmbiguousKeyError,
     ExifFile,
     ExiftoolException,
     _parse_exiftool_datetime,
@@ -71,12 +72,17 @@ class ExifFileTest(unittest.TestCase):
         self.assertEqual(f["System", "FileName"], "photo.jpg")
         self.assertEqual(f.get_filename(), Path("photo.jpg"))
         with self.assertRaises(KeyError):
-            f["Missing"]
+            _ = f["Missing"]
 
     def test_ambiguous_lookup(self):
         f = self.exif(A={"Model": "X"}, B={"Model": "Y"})
-        with self.assertRaises(Exception):
-            f["Model"]
+        with self.assertRaises(AmbiguousKeyError):
+            _ = f["Model"]
+
+    def test_embedded_image(self):
+        self.assertTrue(self.exif(Preview={"PreviewImage": "(Binary data)"}).has_embedded_image())
+        self.assertTrue(self.exif(MakerNotes={"JpgFromRaw": "(Binary data)"}).has_embedded_image())
+        self.assertFalse(self.exif(System={"FileName": "photo.jpg"}).has_embedded_image())
 
     def test_no_date_or_geotag(self):
         f = self.exif(System={})
@@ -111,8 +117,7 @@ class ExifFileTest(unittest.TestCase):
 class ExiftoolTest(unittest.TestCase):
     def setUp(self):
         imagefiles._DEBUG = False
-        self._tmp = tempfile.TemporaryDirectory()
-        self.dir = Path(self._tmp.name)
+        self.dir = temp_dir(self)
         # A name that would be mangled by a shell, and that isn't ASCII
         self.path = self.dir / "café photo's $HOME.jpg"
         self.path.write_bytes(_JPEG)
@@ -128,9 +133,6 @@ class ExiftoolTest(unittest.TestCase):
             ],
             check=True,
         )
-
-    def tearDown(self):
-        self._tmp.cleanup()
 
     def load(self, files=None, **kwargs):
         return list(gen_images_from_files(self.path if files is None else files, **kwargs))

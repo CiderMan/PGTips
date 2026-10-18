@@ -1,5 +1,6 @@
-import wx
 from pathlib import Path
+
+import wx
 
 _thisDir = Path(__file__).parent
 _pinBitmap = _thisDir / "pin.png"
@@ -8,7 +9,7 @@ _shadowBitmap = _thisDir / "pin_shadow.png"
 _selectedShadowBitmap = _thisDir / "selected_pin_shadow.png"
 
 
-class MarkerImage(object):
+class MarkerImage:
     def __init__(self, imageName, xOffset, yOffset):
         self._image = wx.Image(str(imageName), wx.BITMAP_TYPE_PNG)
         self.bitmap = self._image.ConvertToBitmap()
@@ -16,13 +17,10 @@ class MarkerImage(object):
 
     def hit_test(self, x, y):
         # Where x and y are within the image
-        if not self._image.HasAlpha() or self._image.GetAlpha(x, y) > 127:
-            return True
-        else:
-            return False
+        return not self._image.HasAlpha() or self._image.GetAlpha(x, y) > 127
 
 
-class Marker(object):
+class Marker:
     _defaultPinImage = None
     _defaultShadowImage = None
     _defaultSelectedImage = None
@@ -128,14 +126,11 @@ class Marker(object):
         xOffset += self.pin.hotspot[0]
         yOffset += self.pin.hotspot[1]
         if (
-            xOffset >= 0
-            and xOffset < self.pin.bitmap.GetWidth()
-            and yOffset >= 0
-            and yOffset < self.pin.bitmap.GetHeight()
+            0 <= xOffset < self.pin.bitmap.GetWidth()
+            and 0 <= yOffset < self.pin.bitmap.GetHeight()
         ):
             return self.pin.hit_test(xOffset, yOffset)
-        else:
-            return False
+        return False
 
     def select(self, selected=True):
         assert self.selectable, "Attempt to select an unselectable marker"

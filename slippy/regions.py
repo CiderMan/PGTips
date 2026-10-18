@@ -1,4 +1,4 @@
-class ManagedMembers(object):
+class ManagedMembers:
     def __setattr__(self, key, value):
         if key.startswith("_"):
             object.__setattr__(self, key, value)
@@ -8,10 +8,9 @@ class ManagedMembers(object):
     def __getattribute__(self, key):
         if key.startswith("_"):
             return object.__getattribute__(self, key)
-        elif key in self._ACCESSIBLE_MEMBERS:
+        if key in self._ACCESSIBLE_MEMBERS:
             return object.__getattribute__(self, "_" + key)
-        else:
-            raise AttributeError("Unable to get %s" % key)
+        raise AttributeError("Unable to get %s" % key)
 
 
 class Point(ManagedMembers):
@@ -30,7 +29,7 @@ class Point(ManagedMembers):
         return "Point(%+g, %+g)" % (self._lat, self._long)
 
 
-class Region(object):
+class Region:
     def __init__(self, nw=None, se=None):
         if nw is not None:
             self._nw = Point(nw.lat, nw.long)
@@ -41,7 +40,8 @@ class Region(object):
         else:
             self._se = self._nw
 
-    def intersects(self, other):
+    def intersects(self, _other):
+        # TODO
         return True
 
     def _is_type1(self):
@@ -56,21 +56,11 @@ class Region(object):
         return accu
 
     def _add_something(self, other):
-        addPoint = False
-        addRegion = False
-        try:
-            # Now handle the case where we are adding a point
-            other.lat, other.long
-            addPoint = True
-        except AttributeError:
-            try:
-                # Handle adding a region
-                other._nw, other._se
-                addRegion = True
-            except AttributeError:
-                raise TypeError(
-                    "Don't know how to add a %s to a Region" % other.__class__.__name__
-                )
+        # Something with a latitude and longitude is a point; something with corners is a region
+        addPoint = hasattr(other, "lat") and hasattr(other, "long")
+        addRegion = not addPoint and hasattr(other, "_nw") and hasattr(other, "_se")
+        if not (addPoint or addRegion):
+            raise TypeError("Don't know how to add a %s to a Region" % other.__class__.__name__)
 
         if addPoint:
             self._add_point(other)
@@ -139,7 +129,8 @@ class Region(object):
             self._nw = Point(n, w)
             self._se = Point(s, e)
 
-            # Create a modified version of the region we are adding with the same N-S size as we have
+            # Create a modified version of the region we are adding with the same N-S size as we
+            # have
             r = Region(Point(n, region._nw.long), Point(s, region._se.long))
 
             # Now consider E-W
@@ -210,22 +201,21 @@ class Region(object):
             except AttributeError:
                 raise TypeError(
                     "Don't know how to test for a %s in a Region" % item.__class__.__name__
-                )
+                ) from None
 
     def crosses_lat(self, lat):
         if self._nw is None:
             return False
-        return lat <= self._nw.lat and lat >= self._se.lat
+        return self._se.lat <= lat <= self._nw.lat
 
     def crosses_long(self, long_):
         if self._nw is None:
             return False
         if self._is_type1():
             # Type 1 region
-            return long_ >= self._nw.long and long_ <= self._se.long
-        else:
-            # Type 2 region
-            return long_ >= self._nw.long or long_ <= self._se.long
+            return self._nw.long <= long_ <= self._se.long
+        # Type 2 region
+        return long_ >= self._nw.long or long_ <= self._se.long
 
     def get_centre(self):
         lat = (self._nw.lat + self._se.lat) / 2
@@ -235,26 +225,3 @@ class Region(object):
             if long_ < -180:
                 long_ += 360
         return Point(lat, long_)
-
-
-if __name__ == "__main__":
-
-    def test(cmd, prefix=None):
-        if prefix is not None:
-            print(prefix, end=" ")
-        print(cmd, "=>", end=" ")
-        retval = eval(cmd)
-        print(retval)
-        return retval
-
-    r = test("Region()", "r =")
-    p = test("Point(50, -4)", "p =")
-    r = test("r + p", "r =")
-    r2 = test("Region() + r", "r2 =")
-    p2 = test("Point(50.5, 4.01)", "p2 =")
-    test("r2 + p2")
-    test("Region(p) + Region(p2)")
-    test("Region(Point(51, -4), Point(50, -3)) + Region(Point(51.5, -3.5), Point(50.5, -2.5))")
-    test("Region(Point(51, 179), Point(50, -179)) + Region(Point(51.5, 178), Point(50.5, -179.5))")
-    test("Region(Point(51, 179), Point(50, -179)) + Region(Point(51.5, 179.5), Point(50.5, 178))")
-    test("Region(Point(51, 100), Point(50, -100)) + Region(Point(51.5, -120), Point(50.5, 120))")
